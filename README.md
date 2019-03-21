@@ -24,7 +24,7 @@ outside of the Python standard library.
 
 ## License
 
-rhizopus is released unter GNU GENERAL PUBLIC LICENSE Version 3. 
+rhizopus is released under GNU GENERAL PUBLIC LICENSE Version 3. 
 See LICENSE file for details.
 
 Copyright (c) 2016--2019 Julian Wergieluk
