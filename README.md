@@ -2,7 +2,7 @@
 
 Rhizopus is a Python trading simulation framework and a backtesting tool. It
 can be used to construct broker simulators for backtesting with historical 
-data, as well as for live trading. It's main idea is to provide a simple unified 
+data, as well as for live trading. It's main goal is to provide a simple unified 
 interface for both backtesting and live trading.
 
 ## Features
