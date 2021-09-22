@@ -1,16 +1,27 @@
+import bisect
 import datetime
-from types import MappingProxyType
-from typing import Optional, Dict, Tuple, Sequence, Union, KeysView, List, Mapping
+import logging
+import math
 import numbers
 from collections import defaultdict
-import math
-import logging
-import bisect
-from . import TTime
+from types import MappingProxyType
+from typing import (
+    Dict,
+    KeysView,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
+
+from rhizopus.types import TTime
 
 
 class SeriesRecorder:
-    """ Records numerical observations (and their obs. time) """
+    """Records numerical observations (and their obs. time)"""
+
     _recent_observations: Dict[Union[str, Sequence[str]], float]
     _observed_times: List[TTime]
     _observed_series: Dict[Union[str, Sequence[str]], Dict[TTime, float]]
@@ -19,18 +30,38 @@ class SeriesRecorder:
         self._observed_times = []  # sorted list of all observation times
         self._observed_series = defaultdict(dict)
         self._recent_observations = {}
+        self.logger = logging.getLogger(__name__)
 
-    def save(self, t: TTime, key: Union[str, Sequence[str]], value: float,
-             min_allowed: float = -1.0e24, max_allowed: float = 1e24):
-        assert t is not None and key is not None and 0 < len(key) < 256 and all(0 < len(x) < 256 for x in key)
+    def save(
+        self,
+        t: TTime,
+        key: Union[str, Sequence[str]],
+        value: float,
+        min_allowed: float = -1.0e24,
+        max_allowed: float = 1e24,
+    ):
+        assert t is not None
+        assert isinstance(key, tuple) or isinstance(key, str)
+        assert 0 < len(key) < 256 and all(
+            0 < len(x) < 256 for x in key
+        ), 'key must be a str or Tuple[str]'
         assert isinstance(value, numbers.Number) or value is None, f'key {key}, value {value}'
+        assert (
+            math.isfinite(min_allowed) and math.isfinite(max_allowed) and min_allowed < max_allowed
+        )
 
         if value is None:
             return
-        assert not math.isnan(value) and min_allowed < value < max_allowed
+
+        if not math.isfinite(value) or value < min_allowed or max_allowed < value:
+            raise ValueError(
+                f'Value {value} for {key} outside of acceptable range [{min_allowed} {max_allowed}]'
+            )
 
         if t in self._observed_series[key].keys():
-            logging.info(f'Update observation of {key} @{t}: {self._observed_series[key][t]} -> {value}')
+            self.logger.warning(
+                f'Updated observation of {key} for t {t}: {self._observed_series[key][t]} -> {value}'
+            )
         else:
             i = bisect.bisect_left(self._observed_times, t)
             if i == len(self._observed_times):
@@ -47,30 +78,44 @@ class SeriesRecorder:
             return None
         return MappingProxyType(self._observed_series[key])
 
-    def get_list_of_pairs(self, key: Union[str, Sequence[str]], starting_with: TTime = datetime.datetime.min
-                          ) -> Optional[Sequence[Tuple[TTime, float]]]:
+    def _obs_pair_generator(
+        self,
+        key: Union[str, Sequence[str]],
+        starting_with: TTime = datetime.datetime.min,
+        ending_not_later_than: TTime = datetime.datetime.max,
+    ):
+        series = self._observed_series[key]
+        for i in range(
+            bisect.bisect(self._observed_times, starting_with),
+            len(self._observed_times),
+        ):
+            t = self._observed_times[i]
+            if t in series.keys() and t <= ending_not_later_than:
+                x = series[t]
+                yield t, x
+
+    def get_list_of_pairs(
+        self,
+        key: Union[str, Sequence[str]],
+        starting_with: TTime = datetime.datetime.min,
+        ending_not_later_than: TTime = datetime.datetime.max,
+    ) -> Optional[Sequence[Tuple[TTime, float]]]:
         if key not in self._observed_series.keys():
             return None
-        ret = []
-        series = self._observed_series[key]
-        for i in range(bisect.bisect(self._observed_times, starting_with), len(self._observed_times)):
-            t = self._observed_times[i]
-            if t in series.keys():
-                x = series[t]
-                ret.append((t, x))
-        return ret
+        return list(self._obs_pair_generator(key, starting_with, ending_not_later_than))
 
-    def get_t_x(self, key: Union[str, Sequence[str]], starting_with: TTime = datetime.datetime.min
-                ) -> Tuple[Sequence[TTime], Sequence[float]]:
+    def get_t_x(
+        self,
+        key: Union[str, Sequence[str]],
+        starting_with: TTime = datetime.datetime.min,
+        ending_not_later_than: TTime = datetime.datetime.max,
+    ) -> Tuple[Sequence[TTime], Sequence[float]]:
         if key not in self._observed_series.keys():
             return [], []
-        series = self._observed_series[key]
         t_list, x_list = [], []
-        for i in range(bisect.bisect(self._observed_times, starting_with), len(self._observed_times)):
-            t = self._observed_times[i]
-            if t in series.keys():
-                t_list.append(t)
-                x_list.append(series[t])
+        for t, x in self._obs_pair_generator(key, starting_with, ending_not_later_than):
+            t_list.append(t)
+            x_list.append(x)
         return t_list, x_list
 
     def get_recent_observations(self) -> Mapping[Union[str, Sequence[str]], float]:
