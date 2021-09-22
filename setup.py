@@ -1,11 +1,4 @@
 from setuptools import setup
-import subprocess
-
-
-def get_development_version():
-    git_output = subprocess.run(['git', 'rev-list', '--count', 'master'], stdout=subprocess.PIPE)
-    version = '0.%s' % git_output.stdout.decode('utf-8').strip()
-    return version
 
 
 def get_requirements():
@@ -16,13 +9,13 @@ def get_requirements():
 
 setup(
     name='rhizopus',
-    version=get_development_version(),
+    version='0.0.2',
     author='Julian Wergieluk',
     author_email='julian@wergieluk.com',
     packages=['rhizopus', ],
-    url='',
-    install_requires=get_requirements(),
-    description='Stochastic processes simulators',
+    url='https://github.com/jwergieluk/rhizopus',
+    install_requires=[],
+    description='Trading simulation framework',
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",

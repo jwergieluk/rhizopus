@@ -51,7 +51,7 @@ See `example.py` for details.
 
 ![Performance](rhizopus_perf.png)
 
-### Carper chart
+### Carpet chart
 
 ![Performance](rhizopus_alloc_weights_rel.png)
 
