@@ -2,10 +2,9 @@ import logging
 import datetime
 from collections import defaultdict
 from typing import Optional, Dict, MutableMapping
-
 from rhizopus.broker import Broker
 from rhizopus.broker_observer import BrokerObserver
-from rhizopus.orders import BackwardTransferOrder, CreateAccountOrder
+from rhizopus.orders import BackwardTransferOrder
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +18,6 @@ class Strategy:
     def __init__(
         self,
         broker: Broker,
-        trade_every_n_days: int = 30,
         max_rel_alloc_deviation: float = 0.01,
     ):
         self.broker = broker
@@ -32,11 +30,9 @@ class Strategy:
         # Total relative (weight) deviation from the target allocation smaller than the following param will not
         # trigger a reallocation.
         self.max_rel_alloc_deviation = max_rel_alloc_deviation
-        self.trade_every_n_days = trade_every_n_days
 
         self.observer = BrokerObserver(broker)
         self.price_cache = {}
-        self.day = None
 
     def run(self, start_time: datetime.datetime, max_iterations: int):
         """Executes the strategy loop"""
@@ -44,15 +40,10 @@ class Strategy:
             self.observer.update()
             self.broker.next()
         for time_index in range(max_iterations):
-            broker_day = self.broker.get_time().date()
             self.observer.update()
-            if not self.day or (broker_day - self.day).days >= self.trade_every_n_days:
-                new_orders = self._get_orders()
-                for order in new_orders:
-                    self.broker.fill_order(order)
-                self.day = broker_day
-            else:
-                logger.info(f"Skip trading on {self.broker.get_time()}")
+            new_orders = self._get_orders()
+            for order in new_orders:
+                self.broker.fill_order(order)
             if self.broker.next() is None:
                 break
 
@@ -65,7 +56,9 @@ class Strategy:
 
     def _get_orders(self):
         if len(self.broker.get_active_orders()) > 0:
-            logger.info(f"Skip generate_orders() for {self.day}: Active orders found.")
+            logger.info(
+                f"Skip generate_orders() for time {self.observer.now}: Active orders found."
+            )
             return []
         self._update_price_cache()
         self.current_portfolio_weights = {
@@ -75,7 +68,9 @@ class Strategy:
         }
         target_asset_allocation = self.get_target_allocation()
         if target_asset_allocation is None:
-            logger.info(f"Skip generate_orders() for {self.day}: No target allocation calculated.")
+            logger.info(
+                f"Skip generate_orders() for time {self.observer.now}: No target allocation calculated."
+            )
             self.observer.save(("portfolio", "reallocation_mass"), 0.0)
             return []
         return self._get_orders_for_allocation(target_asset_allocation)
@@ -105,18 +100,11 @@ class Strategy:
         cash_acc = self.default_numeraire  # cash account name is the default numeraire name
 
         if self.broker.get_value_portfolio() is None:
-            logger.warning(f"Portfolio value is not well-defined for {self.day}.")
+            logger.warning(f"Portfolio value is not well-defined for time {self.observer.now}")
             return []
 
         orders = []
-        # cash_reserve_error = self.target_cash_reserve - (1.0 - sum(target_weights.values()))
-        # if cash_reserve_error > 0.0:
-        #     num_significant_weights = sum(1 for k, v in target_weights.items() if v > self.target_cash_reserve)
-        #     for k, v in target_weights.items():
-        #         if target_weights[k] <= self.target_cash_reserve:
-        #             continue
-        #         target_weights[k] = target_weights[k] - cash_reserve_error / num_significant_weights
-        # assert all(0.0 <= w <= 1.0 for w in target_weights.values())
+
         reallocation_mass = sum(abs(weights[acc] - target_weights[acc]) for acc in accounts)
         if reallocation_mass < self.max_rel_alloc_deviation:
             logger.info(
