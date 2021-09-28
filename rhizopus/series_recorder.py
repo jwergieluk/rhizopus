@@ -1,10 +1,7 @@
 import bisect
 import datetime
 import logging
-import math
 from collections import defaultdict
-
-from rhizopus.primitives import Time, raise_for_time, raise_for_key, raise_for_value
 from types import MappingProxyType
 from typing import (
     Dict,
@@ -16,6 +13,8 @@ from typing import (
     Tuple,
     Union,
 )
+
+from rhizopus.primitives import Time, raise_for_time, raise_for_key, checked_value
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +41,7 @@ class SeriesRecorder:
     ):
         raise_for_time(t)
         raise_for_key(key)
-        raise_for_value(key, value, min_allowed, max_allowed)
+        value = checked_value(key, value, min_allowed, max_allowed)
 
         if t in self._observed_series[key].keys():
             logger.warning(

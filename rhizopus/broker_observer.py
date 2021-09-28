@@ -14,7 +14,6 @@ from rhizopus.broker import Broker
 from rhizopus.primitives import Time, raise_for_key
 from rhizopus.series_recorder import SeriesRecorder
 
-
 logger = logging.getLogger(__name__)
 
 

@@ -1,16 +1,15 @@
-import numbers
 from functools import reduce
 from operator import mul
 from typing import Iterable, List, Mapping, Optional, Set, Tuple
 
 
-def get_numeraires_from_prices(prices: Mapping[Tuple[str, str], numbers.Real]) -> Set[str]:
+def get_numeraires_from_prices(prices: Mapping[Tuple[str, str], float]) -> Set[str]:
     return set([edge[0] for edge in prices] + [edge[1] for edge in prices])
 
 
 def get_price_from_dict(
-    prices: Mapping[Tuple[str, str], numbers.Real], num0: str, num1: str
-) -> Optional[numbers.Real]:
+    prices: Mapping[Tuple[str, str], float], num0: str, num1: str
+) -> Optional[float]:
     if num0 == num1:
         return 1.0
     key = (num0, num1)

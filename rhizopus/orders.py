@@ -1,124 +1,34 @@
-import math
+from typing import Dict, Union
 
-from rhizopus.price_graph import get_price_from_dict
 from rhizopus.broker import BrokerError, BrokerState, Order
-from rhizopus.primitives import Amount, checked_amount
+from rhizopus.price_graph import get_price_from_dict
+from rhizopus.primitives import (
+    Amount,
+    checked_amount,
+    checked_str_id,
+    checked_value,
+)
 
 
 class ObserveInstrumentOrder(Order):
-    def execute(self, broker_state: BrokerState):
-        pass
-
     def __init__(self, instrument: str):
         super().__init__()
-        self.instrument = instrument
+        self.instrument = checked_str_id(instrument)
+
+    def execute(self, broker_state: BrokerState) -> bool:
+        raise NotImplementedError
 
     def __str__(self):
         return f'{self.__class__.__name__}/{self.gid}: {self.instrument}'
 
 
-class CfdOpenOrder(Order):
-    def execute(self, broker_state: BrokerState):
-        pass
-
-    def __init__(self, num0: str, num1: str, units: float, gid: int = 0):
-        assert len(num0) > 0 and len(num1) > 0 and num0 != num1
-        assert math.isfinite(units)
-        super().__init__(gid)
-        self.num0 = num0
-        self.num1 = num1
-        self.units = units
-
-    def __eq__(self, other):
-        if not isinstance(other, self.__class__):
-            return False
-        if (
-            self.num0 == other.num0
-            and self.num1 == other.num1
-            and abs(self.units - other.units) < 1e-12
-        ):
-            return True
-        if (
-            self.num0 == other.num1
-            and self.num1 == other.num0
-            and abs(self.units + other.units) < 1e-12
-        ):
-            return True
-        return False
-
-    def __repr__(self):
-        return f'{self.__class__.__name__}("{self.num0}", "{self.num1}", {self.units})'
-
-    def __str__(self):
-        return f'{self.__class__.__name__}/{self.gid}: {self.num0}_{self.num1}: {self.units}'
-
-
-class CfdCloseOrder(Order):
-    def execute(self, broker_state: BrokerState):
-        pass
-
-    def __init__(self, acc0: str, acc1: str, gid: int = 0):
-        assert len(acc0) > 0 and len(acc1) > 0 and acc0 != acc1
-        super().__init__(gid)
-        self.acc0 = acc0
-        self.acc1 = acc1
-
-    def __eq__(self, other):
-        if not isinstance(other, self.__class__):
-            return False
-        if self.acc0 == other.acc0 and self.acc1 == other.acc1:
-            return True
-        if self.acc0 == other.acc1 and self.acc1 == other.acc0:
-            return True
-        return False
-
-    def __repr__(self):
-        return f'{self.__class__.__name__}("{self.acc0}", "{self.acc1}")'
-
-    def __str__(self):
-        return f'{self.__class__.__name__}/{self.gid}: {self.acc0}, {self.acc1}'
-
-
-class CfdReduceOrder(Order):
-    def execute(self, broker_state: BrokerState):
-        pass
-
-    def __init__(self, acc0: str, acc1: str, units0: float, gid: int = 0):
-        """Reduce a Cfd trade by opening an opposite trade and merging both together
-
-        The meaning of the parameters corresponds to that of the CfdOpenOrder
-        """
-        assert len(acc0) > 0 and len(acc1) > 0 and acc0 != acc1 and abs(units0) > 1e-12
-        super().__init__(gid)
-        self.acc0 = acc0
-        self.acc1 = acc1
-        self.units0 = units0
-
-    def __eq__(self, other):
-        if not isinstance(other, self.__class__):
-            return False
-        if (
-            self.acc0 == other.acc0
-            and self.acc1 == other.acc1
-            and abs(self.units0 - other.units0) < 1e-12
-        ):
-            return True
-        return False
-
-    def __repr__(self):
-        return f'{self.__class__.__name__}("{self.acc0}", "{self.acc1}", {self.units0})'
-
-    def __str__(self):
-        return f'{self.__class__.__name__}/{self.gid}: {self.acc0}, {self.acc1}, {self.units0}'
-
-
 class CreateAccountOrder(Order):
-    def __init__(self, name: str, amount: Amount, gid: int = 0):
+    def __init__(self, account_name: str, amount: Amount, gid: int = 0):
         super().__init__(gid)
-        self.account_name = name
+        self.account_name = checked_str_id(account_name)
         self.amount = checked_amount(amount)
 
-    def execute(self, broker_state: BrokerState):
+    def execute(self, broker_state: BrokerState) -> bool:
         if self.account_name in broker_state.accounts.keys():
             raise BrokerError(f'Account {self.account_name} already exists')
         broker_state.accounts[self.account_name] = self.amount
@@ -132,11 +42,11 @@ class CreateAccountOrder(Order):
 
 
 class DeleteAccountOrder(Order):
-    def __init__(self, name: str, gid: int = 0):
+    def __init__(self, account_name: str, gid: int = 0):
         super().__init__(gid)
-        self.account_name = name
+        self.account_name = checked_str_id(account_name)
 
-    def execute(self, broker_state: BrokerState):
+    def execute(self, broker_state: BrokerState) -> bool:
         """Order will wait until the target account is defunded and delete it"""
         if self.account_name not in broker_state.accounts.keys():
             raise BrokerError(f'{self.__class__.__name__}: Account {self.account_name} not found')
@@ -159,12 +69,13 @@ class TransferAllOrder(Order):
     def __init__(self, acc0: str, acc1: str, persistent: bool = False, gid: int = 0):
         """Transfer all wealth from acc0 to acc1"""
         super().__init__(gid)
-        assert acc0 != acc1 and len(acc0) > 0 and len(acc1) > 0
-        self.acc0 = acc0
-        self.acc1 = acc1
+        self.acc0 = checked_str_id(acc0)
+        self.acc1 = checked_str_id(acc1)
+        if self.acc0 == self.acc1:
+            raise ValueError(f'Source and destination accounts must be different: {self.acc0}')
         self.persistent = persistent
 
-    def execute(self, broker_state: BrokerState):
+    def execute(self, broker_state: BrokerState) -> bool:
         if (
             self.acc0 not in broker_state.accounts.keys()
             or self.acc1 not in broker_state.accounts.keys()
@@ -196,12 +107,13 @@ class BackwardTransferOrder(Order):
     def __init__(self, acc0: str, acc1: str, amount: Amount, gid: int = 0):
         """Transfer wealth from acc0 to acc1 and target the specified amount change in acc1"""
         super().__init__(gid)
-        assert acc0 != acc1 and len(acc0) > 0 and len(acc1) > 0
-        self.acc0 = acc0
-        self.acc1 = acc1
+        self.acc0 = checked_str_id(acc0)
+        self.acc1 = checked_str_id(acc1)
+        if self.acc0 == self.acc1:
+            raise ValueError(f'Source and destination accounts must be different: {self.acc0}')
         self.amount = checked_amount(amount)
 
-    def execute(self, broker_state: BrokerState):
+    def execute(self, broker_state: BrokerState) -> bool:
         acc0 = self.acc0
         acc1 = self.acc1
         if acc0 not in broker_state.accounts.keys() or acc1 not in broker_state.accounts.keys():
@@ -218,7 +130,10 @@ class BackwardTransferOrder(Order):
             price_b = get_price_from_dict(broker_state.current_prices, order_num, num1)
         if price_a is None or price_b is None:
             return False
-        assert price_b > 0.0 and price_a > 0.0
+        if price_a < 0.0 or price_b < 0.0:
+            raise BrokerError(
+                f'Negative prices for {num0} {num1} {order_num} detected: {price_a} {price_b}'
+            )
         if order_value >= 0.0:
             new_acc0 = (value0 - order_value / (price_a * price_b), num0)
             new_acc1 = (value1 + order_value / price_b, num1)
@@ -228,10 +143,6 @@ class BackwardTransferOrder(Order):
         broker_state.accounts[acc0] = new_acc0
         broker_state.accounts[acc1] = new_acc1
         return True
-
-    def inversed(self):
-        assert False
-        # return ForwardTransferOrder(self.acc1, self.acc0, (-self.amount[0], self.amount[1]))
 
     def __eq__(self, other):
         return transfer_order_comparator(self, other)
@@ -247,12 +158,13 @@ class ForwardTransferOrder(Order):
     def __init__(self, acc0: str, acc1: str, amount: Amount, gid: int = 0):
         """Transfer wealth from acc0 to acc1 and target the specified amount change in acc0"""
         super().__init__(gid)
-        assert acc0 != acc1 and acc0 and acc1
-        self.acc0 = acc0
-        self.acc1 = acc1
+        self.acc0 = checked_str_id(acc0)
+        self.acc1 = checked_str_id(acc1)
+        if self.acc0 == self.acc1:
+            raise ValueError(f'Source and destination accounts must be different: {self.acc0}')
         self.amount = checked_amount(amount)
 
-    def execute(self, broker_state: BrokerState):
+    def execute(self, broker_state: BrokerState) -> bool:
         acc0 = self.acc0
         acc1 = self.acc1
         if acc0 not in broker_state.accounts.keys() or acc1 not in broker_state.accounts.keys():
@@ -271,7 +183,10 @@ class ForwardTransferOrder(Order):
             price_b = get_price_from_dict(broker_state.current_prices, num1, num0)
         if price_a is None or price_b is None:
             return False
-        assert price_b > 0.0 and price_a > 0.0
+        if price_a < 0.0 or price_b < 0.0:
+            raise BrokerError(
+                f'Negative prices for {num0} {num1} {order_num} detected: {price_a} {price_b}'
+            )
         if order_value >= 0.0:
             # Send the wealth needed to buy 'amount' from acc0 to acc1
             new_acc0 = (value0 - order_value / price_a, num0)
@@ -283,10 +198,6 @@ class ForwardTransferOrder(Order):
         broker_state.accounts[acc0] = new_acc0
         broker_state.accounts[acc1] = new_acc1
         return True
-
-    def inversed(self):
-        assert False
-        # return BackwardTransferOrder(self.acc1, self.acc0, (-self.amount[0], self.amount[1]))
 
     def __eq__(self, other):
         return transfer_order_comparator(self, other)
@@ -314,32 +225,33 @@ def transfer_order_comparator(o1, o2):
 class AddToVariableOrder(Order):
     def __init__(self, variable_name: str, value: float, gid: int = 0):
         super().__init__(gid)
-        assert isinstance(variable_name, str) and variable_name
-        assert math.isfinite(value)
-        self.name = variable_name
+        self.variable_name = checked_str_id(variable_name)
+        value = checked_value(self.variable_name, value)
         self.value = value
 
-    def execute(self, broker_state: BrokerState):
-        if self.name in broker_state.variables.keys():
-            broker_state.variables[self.name] += self.value
+    def execute(self, broker_state: BrokerState) -> bool:
+        if self.variable_name in broker_state.variables.keys():
+            broker_state.variables[self.variable_name] += self.value
         else:
-            broker_state.variables[self.name] = self.value
+            broker_state.variables[self.variable_name] = self.value
         return True
 
     def __str__(self):
         if self.value < 0:
-            return f"{self.__class__.__name__}/{self.gid}: {self.name} -= {abs(self.value)}"
-        return f"{self.__class__.__name__}/{self.gid}: {self.name} += {self.value}"
+            return (
+                f"{self.__class__.__name__}/{self.gid}: {self.variable_name} -= {abs(self.value)}"
+            )
+        return f"{self.__class__.__name__}/{self.gid}: {self.variable_name} += {self.value}"
 
 
 class UpdateVariablesOrder(Order):
-    def __init__(self, vars_update: dict, gid: int = 0):
+    def __init__(self, vars_update: Dict[str, Union[float, str]], gid: int = 0):
         super().__init__(gid)
         # TODO check vars_update keys and values more precisely
         assert len(vars_update) > 0
         self.vars_update = vars_update
 
-    def execute(self, broker_state: BrokerState):
+    def execute(self, broker_state: BrokerState) -> bool:
         broker_state.variables.update(self.vars_update)
         return True
 
@@ -352,12 +264,11 @@ class UpdateVariablesOrder(Order):
 class AddToAccountBalanceOrder(Order):
     def __init__(self, account_name: str, value: float, gid: int = 0):
         super().__init__(gid)
-        assert account_name is not None and account_name
-        assert math.isfinite(value)
-        self.account_name = account_name
+        self.account_name = checked_str_id(account_name)
+        value = checked_value(self.account_name, value)
         self.value = value
 
-    def execute(self, broker_state: BrokerState):
+    def execute(self, broker_state: BrokerState) -> bool:
         if self.account_name not in broker_state.accounts.keys():
             raise BrokerError(f'Account {self.account_name} not found.')
         old_value, num = broker_state.accounts[self.account_name]
@@ -368,3 +279,102 @@ class AddToAccountBalanceOrder(Order):
         if self.value < 0:
             return f"{self.__class__.__name__}/{self.gid}: {self.account_name} -= {abs(self.value)}"
         return f"{self.__class__.__name__}/{self.gid}: {self.account_name} += {self.value}"
+
+
+class CfdOpenOrder(Order):
+    def execute(self, broker_state: BrokerState) -> bool:
+        raise NotImplementedError
+
+    def __init__(self, num0: str, num1: str, units: float, gid: int = 0):
+        super().__init__(gid)
+        self.num0 = checked_str_id(num0)
+        self.num1 = checked_str_id(num1)
+        if self.num0 == self.num1:
+            raise ValueError(f'Please specify two different numeraires: {self.num0}')
+        self.units = checked_value(f'{num0} {num1}', units)
+
+    def __eq__(self, other):
+        if not isinstance(other, self.__class__):
+            return False
+        if (
+            self.num0 == other.num0
+            and self.num1 == other.num1
+            and abs(self.units - other.units) < 1e-12
+        ):
+            return True
+        if (
+            self.num0 == other.num1
+            and self.num1 == other.num0
+            and abs(self.units + other.units) < 1e-12
+        ):
+            return True
+        return False
+
+    def __repr__(self):
+        return f'{self.__class__.__name__}("{self.num0}", "{self.num1}", {self.units})'
+
+    def __str__(self):
+        return f'{self.__class__.__name__}/{self.gid}: {self.num0}_{self.num1}: {self.units}'
+
+
+class CfdCloseOrder(Order):
+    def execute(self, broker_state: BrokerState) -> bool:
+        raise NotImplementedError
+
+    def __init__(self, acc0: str, acc1: str, gid: int = 0):
+        super().__init__(gid)
+        self.acc0 = checked_str_id(acc0)
+        self.acc1 = checked_str_id(acc1)
+        if self.acc0 == self.acc1:
+            raise ValueError(f'Source and destination accounts must be different: {self.acc0}')
+
+    def __eq__(self, other):
+        if not isinstance(other, self.__class__):
+            return False
+        if self.acc0 == other.acc0 and self.acc1 == other.acc1:
+            return True
+        if self.acc0 == other.acc1 and self.acc1 == other.acc0:
+            return True
+        return False
+
+    def __repr__(self):
+        return f'{self.__class__.__name__}("{self.acc0}", "{self.acc1}")'
+
+    def __str__(self):
+        return f'{self.__class__.__name__}/{self.gid}: {self.acc0}, {self.acc1}'
+
+
+class CfdReduceOrder(Order):
+    def execute(self, broker_state: BrokerState) -> bool:
+        raise NotImplementedError
+
+    def __init__(self, acc0: str, acc1: str, units: float, gid: int = 0):
+        """Reduce a Cfd trade by opening an opposite trade and merging both together
+
+        The meaning of the parameters corresponds to that of the CfdOpenOrder
+        """
+        super().__init__(gid)
+        self.acc0 = checked_str_id(acc0)
+        self.acc1 = checked_str_id(acc1)
+        if self.acc0 == self.acc1:
+            raise ValueError(f'Source and destination accounts must be different: {self.acc0}')
+
+        units = checked_value(f'{acc0} {acc1}', units)
+        self.units0 = units
+
+    def __eq__(self, other):
+        if not isinstance(other, self.__class__):
+            return False
+        if (
+            self.acc0 == other.acc0
+            and self.acc1 == other.acc1
+            and abs(self.units0 - other.units0) < 1e-12
+        ):
+            return True
+        return False
+
+    def __repr__(self):
+        return f'{self.__class__.__name__}("{self.acc0}", "{self.acc1}", {self.units0})'
+
+    def __str__(self):
+        return f'{self.__class__.__name__}/{self.gid}: {self.acc0}, {self.acc1}, {self.units0}'

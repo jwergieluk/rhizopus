@@ -114,55 +114,55 @@ class BrokerSimulator(AbstractBrokerConn):
         start_time: datetime.datetime = datetime.datetime.min,
     ):
         self.filters = filters
-        self.__default_numeraire = default_numeraire
-        self.__start_time = start_time
-        self.__prices = {}
+        self._default_numeraire = default_numeraire
+        self._start_time = start_time
+        self._prices = {}
 
         for num_pair in time_series_store.edges():
             num0 = num_pair[0]
             num1 = num_pair[1]
             series = time_series_store[num_pair]
-            self.__prices[(num0, num1)] = dict(series)
+            self._prices[(num0, num1)] = dict(series)
 
-        self.__time_grid = set()
-        for key in self.__prices.keys():
-            for times in self.__prices[key].keys():
-                self.__time_grid.add(times)
-        self.__time_grid = list(sorted(self.__time_grid))
-        self.__time_index = 0
-        self.__group_id = 0
+        self._time_grid = set()
+        for key in self._prices.keys():
+            for times in self._prices[key].keys():
+                self._time_grid.add(times)
+        self._time_grid = list(sorted(self._time_grid))
+        self._time_index = 0
+        self._group_id = 0
 
-        for self.__time_index in range(len(self.__time_grid)):
-            if self.__time_grid[self.__time_index] >= self.__start_time:
+        for self._time_index in range(len(self._time_grid)):
+            if self._time_grid[self._time_index] >= self._start_time:
                 break
 
     def get_default_numeraire(self) -> Optional[str]:
-        return self.__default_numeraire
+        return self._default_numeraire
 
     def next(self, broker_state: BrokerState) -> Optional[datetime.datetime]:
-        self.__time_index += 1
-        if len(self.__time_grid) < self.__time_index:
+        self._time_index += 1
+        if len(self._time_grid) < self._time_index:
             raise BrokerError('Backtest end of time reached')
-        if len(self.__time_grid) == self.__time_index:
+        if len(self._time_grid) == self._time_index:
             return None
-        broker_state.time_index = self.__time_index
-        broker_state.now = self.__time_grid[self.__time_index]
-        broker_state.default_numeraire = self.__default_numeraire
+        broker_state.time_index = self._time_index
+        broker_state.now = self._time_grid[self._time_index]
+        broker_state.default_numeraire = self._default_numeraire
 
-        self.__update_current_prices(broker_state)
+        self._update_current_prices(broker_state)
         try:
-            self.__process_orders(broker_state)
+            self._process_orders(broker_state)
         except BrokerError:
             raise
         return broker_state.now
 
-    def __update_current_prices(self, broker_state: BrokerState) -> None:
+    def _update_current_prices(self, broker_state: BrokerState) -> None:
         broker_state.current_prices.clear()
-        for key in self.__prices.keys():
-            if broker_state.now in self.__prices[key].keys():
-                broker_state.current_prices[key] = self.__prices[key][broker_state.now]
+        for key in self._prices.keys():
+            if broker_state.now in self._prices[key].keys():
+                broker_state.current_prices[key] = self._prices[key][broker_state.now]
 
-    def __process_orders(self, broker_state: BrokerState) -> None:
+    def _process_orders(self, broker_state: BrokerState) -> None:
         postponed_orders = []
         for order in sorted(broker_state.active_orders, key=lambda o: o.age):
             processed = order.execute(broker_state)
@@ -190,7 +190,7 @@ class BrokerSimulator(AbstractBrokerConn):
         and removed from the active_orders queue. This is necessary because filters use that
         queue.
         """
-        order.gid = self.__get_group_id()
+        order.gid = self._get_group_id()
         if not self.filters:
             broker_state.active_orders.append(order)
             return
@@ -221,6 +221,6 @@ class BrokerSimulator(AbstractBrokerConn):
         broker_state.active_orders = deque(active_orders_snapshot, maxlen=1000)
         broker_state.active_orders.extend(filter_input_orders)
 
-    def __get_group_id(self) -> int:
-        self.__group_id += 1
-        return self.__group_id
+    def _get_group_id(self) -> int:
+        self._group_id += 1
+        return self._group_id

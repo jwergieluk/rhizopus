@@ -6,8 +6,8 @@ from enum import Enum, auto
 from types import MappingProxyType
 from typing import Dict, KeysView, List, Mapping, Optional, Tuple, Union
 
-from rhizopus.primitives import Time, Amount, raise_for_time
 from rhizopus.price_graph import calc_path_price, get_price_from_dict
+from rhizopus.primitives import Time, Amount, raise_for_time
 
 logger = logging.getLogger(__name__)
 
@@ -93,8 +93,11 @@ class Order:
         self.transaction_id = None
         self.gid = gid
 
-    def execute(self, broker_state: BrokerState):
-        """Order execution in the simulation environment"""
+    def execute(self, broker_state: BrokerState) -> bool:
+        """Order execution in the simulation environment
+
+        Returns whether the order can be moved to the executed order queue.
+        """
         raise NotImplementedError
 
     def __repr__(self):

@@ -99,7 +99,7 @@ def test_transaction_cost_filter():
         'USD_CASH': (0.0, 'USD'),
     }
     orders = [CreateAccountOrder(acc, amount) for acc, amount in accounts.items()]
-    filters = [TransactionCostFilter('EUR_CASH', 5, 'tc', ['EUR_CASH', 'USD_CASH'])]
+    filters = [TransactionCostFilter('EUR_CASH', 5.0, 'tc', ['EUR_CASH', 'USD_CASH'])]
     market = BrokerSimulator(series_store, filters, default_numeraire='EUR')
     broker = Broker(market, initial_orders=orders)
 

@@ -99,7 +99,7 @@ def test_wrong_key(key):
         rec.save(datetime.datetime.utcnow(), key, 0.01)
 
 
-@pytest.mark.parametrize('value', [None, 0, '0', '', math.nan, math.inf, -math.inf])
+@pytest.mark.parametrize('value', [None, '0', '', math.nan, math.inf, -math.inf])
 def test_wrong_value(value):
     rec = SeriesRecorder()
     with pytest.raises(ValueError):
