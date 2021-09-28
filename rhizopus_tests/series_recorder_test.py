@@ -1,5 +1,7 @@
 import datetime
+import math
 import random
+import pytest
 
 from rhizopus.series_recorder import SeriesRecorder
 
@@ -26,7 +28,7 @@ def some_observation_pairs(t0, n: int = 50):
     return list(zip(t, x))
 
 
-def test_series_recorder1():
+def test_simple1():
     t0 = datetime.datetime.utcnow()
     s1, s2, s3 = (some_observation_pairs(t0) for _ in range(3))
 
@@ -66,3 +68,58 @@ def test_series_recorder1():
     assert rec.get_t_x('s2') == ([x[0] for x in d2s(s2)], [x[1] for x in d2s(s2)])
     assert rec.get_t_x('s3') == ([x[0] for x in d2s(s3)], [x[1] for x in d2s(s3)])
     assert min(rec.get_t_x('s1', t0)[0]) >= t0
+
+
+def test_tzinfo0():
+    wrong_times = []
+    t = datetime.datetime.utcnow()
+    t = datetime.datetime.combine(
+        t.date(), t.time(), tzinfo=datetime.timezone(offset=datetime.timedelta(hours=1), name='CET')
+    )
+    wrong_times.append(t)
+
+    t = datetime.datetime.utcnow()
+    t = datetime.datetime.combine(t.date(), t.time(), tzinfo=datetime.timezone.utc)
+    wrong_times.append(t)
+
+    series_recorder = SeriesRecorder()
+    for t in wrong_times:
+        with pytest.raises(ValueError):
+            series_recorder.save(t, 'key0', 0.1)
+
+    series_recorder.save(datetime.datetime.utcnow(), 'key', 2.33)
+
+
+@pytest.mark.parametrize(
+    'key', ['', 0, ('key', 0), ('key', 0.1), ('key', ''), ('key',), ('key', None), (None,)]
+)
+def test_wrong_key(key):
+    rec = SeriesRecorder()
+    with pytest.raises(ValueError):
+        rec.save(datetime.datetime.utcnow(), key, 0.01)
+
+
+@pytest.mark.parametrize('value', [None, 0, '0', '', math.nan, math.inf, -math.inf])
+def test_wrong_value(value):
+    rec = SeriesRecorder()
+    with pytest.raises(ValueError):
+        rec.save(datetime.datetime.utcnow(), 'key', value)
+
+
+@pytest.mark.parametrize(
+    't',
+    [
+        datetime.datetime.utcnow().date(),
+        datetime.datetime.utcnow().time(),
+        0.0,
+        0,
+        None,
+        '',
+        datetime.datetime(1965, 1, 1),
+        datetime.datetime(2100, 1, 1),
+    ],
+)
+def test_wrong_time(t):
+    rec = SeriesRecorder()
+    with pytest.raises(ValueError):
+        rec.save(t, 'key', 1.0)

@@ -2,8 +2,9 @@ import bisect
 import datetime
 import logging
 import math
-import numbers
 from collections import defaultdict
+
+from rhizopus.primitives import Time, raise_for_time, raise_for_key, raise_for_value
 from types import MappingProxyType
 from typing import (
     Dict,
@@ -16,50 +17,35 @@ from typing import (
     Union,
 )
 
-from rhizopus.types import TTime
+logger = logging.getLogger(__name__)
 
 
 class SeriesRecorder:
     """Records numerical observations (and their obs. time)"""
 
     _recent_observations: Dict[Union[str, Sequence[str]], float]
-    _observed_times: List[TTime]
-    _observed_series: Dict[Union[str, Sequence[str]], Dict[TTime, float]]
+    _observed_times: List[Time]
+    _observed_series: Dict[Union[str, Sequence[str]], Dict[Time, float]]
 
     def __init__(self):
         self._observed_times = []  # sorted list of all observation times
         self._observed_series = defaultdict(dict)
         self._recent_observations = {}
-        self.logger = logging.getLogger(__name__)
 
     def save(
         self,
-        t: TTime,
+        t: Time,
         key: Union[str, Sequence[str]],
         value: float,
         min_allowed: float = -1.0e24,
         max_allowed: float = 1e24,
     ):
-        assert t is not None
-        assert isinstance(key, tuple) or isinstance(key, str)
-        assert 0 < len(key) < 256 and all(
-            0 < len(x) < 256 for x in key
-        ), 'key must be a str or Tuple[str]'
-        assert isinstance(value, numbers.Number) or value is None, f'key {key}, value {value}'
-        assert (
-            math.isfinite(min_allowed) and math.isfinite(max_allowed) and min_allowed < max_allowed
-        )
-
-        if value is None:
-            return
-
-        if not math.isfinite(value) or value < min_allowed or max_allowed < value:
-            raise ValueError(
-                f'Value {value} for {key} outside of acceptable range [{min_allowed} {max_allowed}]'
-            )
+        raise_for_time(t)
+        raise_for_key(key)
+        raise_for_value(key, value, min_allowed, max_allowed)
 
         if t in self._observed_series[key].keys():
-            self.logger.warning(
+            logger.warning(
                 f'Updated observation of {key} for t {t}: {self._observed_series[key][t]} -> {value}'
             )
         else:
@@ -73,7 +59,7 @@ class SeriesRecorder:
         if max(self._observed_series[key].keys()) == t:
             self._recent_observations[key] = value
 
-    def get_dict(self, key: Union[str, Sequence[str]]) -> Optional[Mapping[TTime, float]]:
+    def get_dict(self, key: Union[str, Sequence[str]]) -> Optional[Mapping[Time, float]]:
         if key not in self._observed_series.keys():
             return None
         return MappingProxyType(self._observed_series[key])
@@ -81,8 +67,8 @@ class SeriesRecorder:
     def _obs_pair_generator(
         self,
         key: Union[str, Sequence[str]],
-        starting_with: TTime = datetime.datetime.min,
-        ending_not_later_than: TTime = datetime.datetime.max,
+        starting_with: Time = datetime.datetime.min,
+        ending_not_later_than: Time = datetime.datetime.max,
     ):
         series = self._observed_series[key]
         for i in range(
@@ -97,9 +83,9 @@ class SeriesRecorder:
     def get_list_of_pairs(
         self,
         key: Union[str, Sequence[str]],
-        starting_with: TTime = datetime.datetime.min,
-        ending_not_later_than: TTime = datetime.datetime.max,
-    ) -> Optional[Sequence[Tuple[TTime, float]]]:
+        starting_with: Time = datetime.datetime.min,
+        ending_not_later_than: Time = datetime.datetime.max,
+    ) -> Optional[Sequence[Tuple[Time, float]]]:
         if key not in self._observed_series.keys():
             return None
         return list(self._obs_pair_generator(key, starting_with, ending_not_later_than))
@@ -107,9 +93,9 @@ class SeriesRecorder:
     def get_t_x(
         self,
         key: Union[str, Sequence[str]],
-        starting_with: TTime = datetime.datetime.min,
-        ending_not_later_than: TTime = datetime.datetime.max,
-    ) -> Tuple[Sequence[TTime], Sequence[float]]:
+        starting_with: Time = datetime.datetime.min,
+        ending_not_later_than: Time = datetime.datetime.max,
+    ) -> Tuple[Sequence[Time], Sequence[float]]:
         if key not in self._observed_series.keys():
             return [], []
         t_list, x_list = [], []
@@ -124,5 +110,5 @@ class SeriesRecorder:
     def keys(self) -> KeysView[Union[str, Sequence[str]]]:
         return self._observed_series.keys()
 
-    def times(self) -> List[TTime]:
+    def times(self) -> List[Time]:
         return self._observed_times

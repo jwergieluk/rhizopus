@@ -1,5 +1,4 @@
 import collections
-import datetime
 import logging
 from abc import ABC
 from collections import deque
@@ -7,8 +6,8 @@ from enum import Enum, auto
 from types import MappingProxyType
 from typing import Dict, KeysView, List, Mapping, Optional, Tuple, Union
 
+from rhizopus.primitives import Time, Amount, raise_for_time
 from rhizopus.price_graph import calc_path_price, get_price_from_dict
-from rhizopus.types import Amount
 
 logger = logging.getLogger(__name__)
 
@@ -32,8 +31,9 @@ class BrokerStateError(BrokerError):
 class BrokerState:
     """Encapsulates the state of the abstract broker.
 
-    This class is passed to concrete brokers and each one of those
-    maps their internal state to the fields of this class.
+    This class is passed to concrete brokers and each one of those maps their internal state to the fields
+    of this class. We assume the following:
+    * The types of the fields correspond to the type annotations as specified below, at any time.
     """
 
     variables: Dict[str, Union[float, str]]
@@ -41,7 +41,7 @@ class BrokerState:
     current_prices: Dict[Tuple[str, str], float]
     recent_prices: Dict[Tuple[str, str], float]
     default_numeraire: str
-    now: Optional[datetime.datetime]
+    now: Optional[Time]
     time_index: int
 
     def __init__(
@@ -62,6 +62,15 @@ class BrokerState:
         self.time_index = 0
         self.active_orders = deque(maxlen=50000)
         self.executed_orders = deque(maxlen=100000)
+
+    def check(self):
+        """Self-check"""
+        if not (type(self.default_numeraire) == str and self.default_numeraire):
+            raise BrokerStateError(f'Wrong default numeraire: {self.default_numeraire}')
+        if not (type(self.time_index) == int and self.time_index >= 0):
+            raise BrokerStateError(f'Wrong time index: {self.time_index}')
+
+        raise_for_time(self.now)
 
 
 class OrderStatus(Enum):
@@ -121,13 +130,15 @@ class Broker:
         self._broker_state.active_orders.extend(initial_orders)
         self.next()  # initialize the broker_state and execute initial orders
 
-    def next(self) -> Optional[datetime.datetime]:
+    def next(self) -> Optional[Time]:
         """Note that this class is not an iterator because independent iterations are not supported"""
         result = self._broker_conn.next(self._broker_state)
+        self._broker_state.check()
         if result is None:
             return None
-        # This executes if orders start piling up in the queue and report the queue status
+
         self._broker_state.recent_prices.update(self._broker_state.current_prices)
+        # This executes if orders start piling up in the queue and report the queue status
         if len(self._broker_state.active_orders) > self._no_postponed_orders_threshold:
             classes = [type(o).__name__ for o in self._broker_state.active_orders]
             summary = ' '.join(f'{c}:{i}' for c, i in collections.Counter(classes).items())
@@ -206,7 +217,7 @@ class Broker:
     def get_recent_prices(self):
         return MappingProxyType(self._broker_state.recent_prices)
 
-    def get_time(self) -> Optional[datetime.datetime]:
+    def get_time(self) -> Optional[Time]:
         return self._broker_state.now
 
     def get_time_index(self) -> Optional[int]:

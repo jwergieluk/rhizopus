@@ -2,10 +2,13 @@ import math
 
 from rhizopus.price_graph import get_price_from_dict
 from rhizopus.broker import BrokerError, BrokerState, Order
-from rhizopus.types import Amount, checked_amount
+from rhizopus.primitives import Amount, checked_amount
 
 
 class ObserveInstrumentOrder(Order):
+    def execute(self, broker_state: BrokerState):
+        pass
+
     def __init__(self, instrument: str):
         super().__init__()
         self.instrument = instrument
@@ -15,6 +18,9 @@ class ObserveInstrumentOrder(Order):
 
 
 class CfdOpenOrder(Order):
+    def execute(self, broker_state: BrokerState):
+        pass
+
     def __init__(self, num0: str, num1: str, units: float, gid: int = 0):
         assert len(num0) > 0 and len(num1) > 0 and num0 != num1
         assert math.isfinite(units)
@@ -48,6 +54,9 @@ class CfdOpenOrder(Order):
 
 
 class CfdCloseOrder(Order):
+    def execute(self, broker_state: BrokerState):
+        pass
+
     def __init__(self, acc0: str, acc1: str, gid: int = 0):
         assert len(acc0) > 0 and len(acc1) > 0 and acc0 != acc1
         super().__init__(gid)
@@ -71,6 +80,9 @@ class CfdCloseOrder(Order):
 
 
 class CfdReduceOrder(Order):
+    def execute(self, broker_state: BrokerState):
+        pass
+
     def __init__(self, acc0: str, acc1: str, units0: float, gid: int = 0):
         """Reduce a Cfd trade by opening an opposite trade and merging both together
 

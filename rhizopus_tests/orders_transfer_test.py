@@ -30,12 +30,12 @@ def samples_accounts():
 
 @pytest.fixture(scope='function')
 def gen_sample_broker_state(sample_prices, samples_accounts):
-    def samble_broker_state():
+    def sample_broker_state():
         broker_state = BrokerState('EUR', samples_accounts)
         broker_state.current_prices.update(sample_prices)
         return broker_state
 
-    return samble_broker_state
+    return sample_broker_state
 
 
 def test_one_num_transfer():

@@ -1,3 +1,4 @@
+import pytest
 from rhizopus.price_graph import find_path, calc_path_price
 
 
@@ -31,3 +32,24 @@ def test_path_price():
     assert calc_path_price(prices, 'XAU', 'EUR') == prices[('XAU', 'USD')] * prices[('USD', 'EUR')]
     assert calc_path_price(prices, 'EUR', 'XAU') == prices[('EUR', 'USD')] * prices[('USD', 'XAU')]
     assert calc_path_price(prices, 'XAU', 'ETH') is None
+
+
+@pytest.mark.parametrize('chain_len', [5, 10, 30])
+def test_long_path(chain_len: int):
+    prices = {}
+    for i in range(chain_len):
+        prices[(f'N{i}', f'N{i+1}')] = 1.0
+        prices[(f'N{i+1}', f'N{i}')] = 1.0
+
+    assert calc_path_price(prices, f'N{chain_len}', 'N0') is None
+    assert calc_path_price(prices, 'N0', f'N{chain_len}') is None
+
+
+def test_one_way():
+    prices = {
+        ('EUR', 'USD'): 1.0,
+        ('USD', 'XAU'): 1000.0,
+    }
+
+    assert calc_path_price(prices, 'EUR', 'XAU') == 1000.0
+    assert calc_path_price(prices, 'XAU', 'EUR') is None

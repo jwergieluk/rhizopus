@@ -91,7 +91,9 @@ class TransactionCostFilter(Filter):
         self.cost_var = cost_var
         self.excluded_accounts = excluded_accounts
 
-    def __call__(self, broker_state: BrokerState, order: BackwardTransferOrder):
+    def __call__(
+        self, broker_state: BrokerState, order: BackwardTransferOrder
+    ) -> Union[Order, Iterable[Order]]:
         if not isinstance(order, BackwardTransferOrder):
             return order
         if order.acc1 in self.excluded_accounts and order.acc0 in self.excluded_accounts:

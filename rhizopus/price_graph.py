@@ -26,7 +26,7 @@ def find_path(
 ):
     """Find a path in a graph (collection of edges)"""
     if max_depth == 0:
-        return traversed_path
+        return None
     visited_nodes = set()
     if len(traversed_path) > 0:
         for edge in traversed_path:

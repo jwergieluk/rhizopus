@@ -10,10 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 class Strategy:
-    """A sample trading strategy class that executes the strategy loop
-
-    Typically, generates one trading signal per day. Supports same-day execution.
-    """
+    """A sample trading strategy class that executes the strategy loop"""
 
     def __init__(
         self,

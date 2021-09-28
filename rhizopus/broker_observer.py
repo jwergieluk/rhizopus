@@ -1,6 +1,4 @@
-import datetime
 import logging
-import numbers
 from typing import (
     Callable,
     Dict,
@@ -13,12 +11,15 @@ from typing import (
 )
 
 from rhizopus.broker import Broker
+from rhizopus.primitives import Time, raise_for_key
 from rhizopus.series_recorder import SeriesRecorder
-from rhizopus.types import TTime
+
+
+logger = logging.getLogger(__name__)
 
 
 class BrokerObserver:
-    now: Optional[datetime.datetime]
+    now: Optional[Time]
 
     def __init__(
         self,
@@ -30,7 +31,6 @@ class BrokerObserver:
         self.rec_vars = rec_vars
         self.rec_acc_navs = rec_acc_navs
         self.rec_acc_weights = rec_acc_weights
-        self.logger = logging.getLogger(__name__)
         self.broker = broker
         self.now = None
 
@@ -40,6 +40,7 @@ class BrokerObserver:
     def add_evaluator(
         self, key: Union[str, Sequence[str]], func: Callable[[Broker], Optional[float]]
     ):
+        raise_for_key(key)
         self.evaluators[key] = func
 
     def save(
@@ -78,7 +79,7 @@ class BrokerObserver:
                     )  # ugly but cheap
                     self.recorder.save(self.now, ('portfolio', 'total_return'), total_return)
                 else:
-                    self.logger.warning(
+                    logger.warning(
                         'NAV history starts with zero. Relative perf measures not available.'
                     )
             if self.rec_acc_weights:
@@ -90,33 +91,33 @@ class BrokerObserver:
                 self.recorder.save(self.now, ('account', account, 'nav'), position_nav)
         if self.rec_vars:
             for key, value in self.broker.get_variables().items():
-                if isinstance(value, numbers.Real) and value is not None:
+                if isinstance(value, float):
                     self.recorder.save(self.now, ('var', key), float(value))
 
-    def get_dict(self, key: Union[str, Sequence[str]]) -> Optional[Mapping[TTime, float]]:
+    def get_dict(self, key: Union[str, Sequence[str]]) -> Optional[Mapping[Time, float]]:
         return self.recorder.get_dict(key)
 
     def get_list_of_pairs(
         self,
         key: Union[str, Sequence[str]],
-        starting_with: TTime = datetime.datetime.min,
-    ) -> Optional[Sequence[Tuple[TTime, float]]]:
+        starting_with: Time = Time.min,
+    ) -> Optional[Sequence[Tuple[Time, float]]]:
         return self.recorder.get_list_of_pairs(key, starting_with)
 
     def get_t_x(
         self,
         key: Union[str, Sequence[str]],
-        starting_with: TTime = datetime.datetime.min,
-    ) -> Tuple[Sequence[TTime], Sequence[float]]:
+        starting_with: Time = Time.min,
+    ) -> Tuple[Sequence[Time], Sequence[float]]:
         return self.recorder.get_t_x(key, starting_with)
 
-    def get_history(self, key) -> Optional[Dict[TTime, float]]:
+    def get_history(self, key) -> Optional[Dict[Time, float]]:
         return self.recorder.get_list_of_pairs(key)
 
-    def get_history_portfolio_nav(self) -> Optional[Dict[TTime, float]]:
+    def get_history_portfolio_nav(self) -> Optional[Dict[Time, float]]:
         return self.get_history(('portfolio', 'nav'))
 
-    def get_history_portfolio_total_return(self) -> Optional[Dict[TTime, float]]:
+    def get_history_portfolio_total_return(self) -> Optional[Dict[Time, float]]:
         return self.get_history(('portfolio', 'total_return'))
 
     def keys(self):
@@ -131,5 +132,5 @@ class BrokerObserver:
     def get_default_numeraire(self) -> Optional[str]:
         return self.broker.get_default_numeraire()
 
-    def times(self) -> List[TTime]:
+    def times(self) -> List[Time]:
         return self.recorder.times()
