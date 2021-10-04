@@ -42,8 +42,13 @@ class Strategy:
             new_orders = self._get_orders()
             for order in new_orders:
                 self.broker.fill_order(order)
+            self.end_of_day()
             if self.broker.next() is None:
                 break
+
+    def end_of_day(self):
+        """Postprocessing step to run custom analytics."""
+        pass
 
     def get_target_allocation(self) -> Optional[MutableMapping[str, float]]:
         """Portfolio allocation method
