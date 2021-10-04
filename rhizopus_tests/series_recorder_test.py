@@ -107,6 +107,49 @@ def test_wrong_value(value):
 
 
 @pytest.mark.parametrize(
+    'value, min_allowed, max_allowed',
+    [
+        (math.inf, 0.0, math.inf),
+        (math.inf, math.inf, math.inf),
+        (math.inf, -math.inf, math.inf),
+        (-math.inf, -math.inf, math.inf),
+        (-math.inf, -math.inf, 0.0),
+    ],
+)
+@pytest.mark.parametrize('allow_nans', [False, True])
+def test_value_checks_positive(
+    value: float, min_allowed: float, max_allowed: float, allow_nans: bool
+):
+    rec = SeriesRecorder()
+    rec.save(datetime.datetime.utcnow(), 'key', value, min_allowed, max_allowed, allow_nans)
+
+
+@pytest.mark.parametrize(
+    'value, min_allowed, max_allowed',
+    [
+        (-math.inf, 0.0, math.inf),
+        (math.inf, -math.inf, 0.0),
+        (math.nan, math.inf, math.inf),
+        (math.nan, -math.inf, math.inf),
+        (math.nan, -1.0, 1.0),
+    ],
+)
+def test_value_checks_negative(value: float, min_allowed: float, max_allowed: float):
+    rec = SeriesRecorder()
+    with pytest.raises(ValueError):
+        rec.save(datetime.datetime.utcnow(), 'key', value, min_allowed, max_allowed, False)
+
+
+@pytest.mark.parametrize('value', [0.0, -math.inf, math.inf, math.nan])
+@pytest.mark.parametrize('min_allowed', [0.0, -math.inf, math.inf, math.nan])
+@pytest.mark.parametrize('max_allowed', [0.0, -math.inf, math.inf, math.nan])
+def test_value_checks_nans_allowed(value: float, min_allowed: float, max_allowed: float):
+    """If NaNs are allowed then you can save any garbage"""
+    rec = SeriesRecorder()
+    rec.save(datetime.datetime.utcnow(), 'key', value, min_allowed, max_allowed, True)
+
+
+@pytest.mark.parametrize(
     't',
     [
         datetime.datetime.utcnow().date(),

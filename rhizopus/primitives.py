@@ -44,12 +44,23 @@ def raise_for_key(key: Union[str, Iterable[str]]) -> None:
 
 
 def raise_for_value(
-    key: str, value: Real, min_allowed: float = -1e24, max_allowed: float = 1e24
+    key: str,
+    value: Real,
+    min_allowed: float = -1e24,
+    max_allowed: float = 1e24,
+    allow_nans: bool = False,
 ) -> None:
     if not isinstance(value, Real):
         raise ValueError(f'Only Real values for {key} are allowed: {value}')
     value = float(value)
-    if not (math.isfinite(value) and min_allowed <= value <= max_allowed):
+    if allow_nans:
+        return
+    if math.isnan(value):
+        raise ValueError(f'NaN value {value} for {key}')
+    if math.isfinite(min_allowed) and math.isfinite(max_allowed):
+        if not math.isfinite(value):
+            raise ValueError(f'Value {value} for {key} is not finite')
+    if not (min_allowed <= value <= max_allowed):
         raise ValueError(
             f'Value {value} for {key} outside of acceptable range [{min_allowed} {max_allowed}]'
         )
@@ -71,18 +82,24 @@ def raise_for_amount(amount: Amount) -> None:
     raise_for_value(num, value)
 
 
-def checked_amount(amount: Amount) -> Amount:
-    raise_for_amount(amount)
-    return amount
-
-
 def checked_str_id(num: str) -> str:
     raise_for_str_id(num)
     return num
 
 
 def checked_value(
-    key: str, value: Real, min_allowed: float = -1e24, max_allowed: float = 1e24
+    key: str,
+    value: Real,
+    min_allowed: float = -1e24,
+    max_allowed: float = 1e24,
+    allow_nans: bool = False,
 ) -> float:
-    raise_for_value(key, value, min_allowed, max_allowed)
+    raise_for_value(key, value, min_allowed, max_allowed, allow_nans)
     return float(value)
+
+
+def checked_amount(amount: Amount) -> Amount:
+    if not (type(amount) == tuple and len(amount) == 2):
+        raise ValueError(f'Wrong amount: {amount}')
+    value, num = amount
+    return checked_value(num, value), checked_str_id(num)

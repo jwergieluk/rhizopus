@@ -38,10 +38,11 @@ class SeriesRecorder:
         value: float,
         min_allowed: float = -1.0e24,
         max_allowed: float = 1e24,
+        allow_nans: bool = False,
     ):
         raise_for_time(t)
         raise_for_key(key)
-        value = checked_value(key, value, min_allowed, max_allowed)
+        value = checked_value(key, value, min_allowed, max_allowed, allow_nans)
 
         if t in self._observed_series[key].keys():
             logger.warning(

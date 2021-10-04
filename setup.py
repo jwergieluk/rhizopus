@@ -9,7 +9,7 @@ def get_requirements():
 
 setup(
     name='rhizopus',
-    version='0.0.6',
+    version='0.0.7',
     author='Julian Wergieluk',
     author_email='julian@wergieluk.com',
     packages=[

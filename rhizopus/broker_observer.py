@@ -48,10 +48,11 @@ class BrokerObserver:
         value: float,
         min_allowed: float = -1.0e24,
         max_allowed: float = 1e24,
+        allow_nans: bool = False,
     ):
         if self.now is None:
             return
-        self.recorder.save(self.now, key, value, min_allowed, max_allowed)
+        self.recorder.save(self.now, key, value, min_allowed, max_allowed, allow_nans)
 
     def update(self):
         new_now = self.broker.get_time()
