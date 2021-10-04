@@ -12,7 +12,9 @@ setup(
     version='0.0.6',
     author='Julian Wergieluk',
     author_email='julian@wergieluk.com',
-    packages=['rhizopus', ],
+    packages=[
+        'rhizopus',
+    ],
     url='https://github.com/jwergieluk/rhizopus',
     install_requires=[],
     description='Trading simulation framework',
