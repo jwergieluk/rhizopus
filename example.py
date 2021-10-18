@@ -1,7 +1,8 @@
 import datetime
 import logging
+import math
 from io import StringIO
-from typing import Dict, Optional, Sequence, Iterable, Tuple
+from typing import Dict, Optional, Sequence, Iterable, Tuple, List
 
 import numpy as np
 import pandas as pd
@@ -14,10 +15,10 @@ from rhizopus.broker_simulator import (
     SeriesStoreBase,
     SeriesStoreFromDict,
 )
-from rhizopus.orders import CreateAccountOrder
+from rhizopus.orders import CreateAccountOrder, InterestOrder
 from rhizopus.strategy import Strategy
 
-from rhizopus.broker import Broker
+from rhizopus.broker import Broker, Order
 
 # Setup a logger to print messages produced by the framework
 logger = logging.getLogger()
@@ -72,7 +73,7 @@ class ConstantMixStrategy(Strategy):
     """
 
     def __init__(self, broker: Broker, target_alloc: Dict[str, float]):
-        super().__init__(broker, trade_every_n_days=2, max_rel_alloc_deviation=0.01)
+        super().__init__(broker, max_rel_alloc_deviation=0.01)
         self.target_alloc = target_alloc
 
     def get_target_allocation(self) -> Dict[str, float]:
@@ -99,7 +100,21 @@ def main():
     )
     accounts = {num: (0.0, num) for num in series_store.vertices()}
     accounts['EUR'] = (1.0e6, 'EUR')  # start capital
-    initial_orders = [CreateAccountOrder(num, amount) for num, amount in accounts.items()]
+    initial_orders: List[Order] = [
+        CreateAccountOrder(num, amount) for num, amount in accounts.items()
+    ]
+    initial_orders.extend(
+        [
+            # earn 50bps positive cash account value
+            InterestOrder(
+                'EUR', interest_rate=0.005, value_lower_bound=0.0, value_upper_bound=math.inf
+            ),
+            # pay 300bps lending cost on negative cash account value
+            InterestOrder(
+                'EUR', interest_rate=0.03, value_lower_bound=-math.inf, value_upper_bound=0.0
+            ),
+        ]
+    )
     broker = Broker(broker_simulator, initial_orders=initial_orders)
 
     strategy = ConstantMixStrategy(broker, target_alloc)

@@ -1,3 +1,4 @@
+import math
 from typing import Dict, Union
 
 from rhizopus.broker import BrokerError, BrokerState, Order, OrderStatus
@@ -295,7 +296,7 @@ class AddToAccountBalanceOrder(Order):
         self.value = value
 
     def execute(self, broker_state: BrokerState) -> OrderStatus:
-        if self.account_name not in broker_state.accounts.keys():
+        if self.account_name not in broker_state.accounts:
             return self.set_status(
                 OrderStatus.REJECTED, broker_state.now, f'Account {self.account_name} not found.'
             )
@@ -307,6 +308,80 @@ class AddToAccountBalanceOrder(Order):
         if self.value < 0:
             return f"{self.__class__.__name__}/{self.gid}: {self.account_name} -= {abs(self.value)}"
         return f"{self.__class__.__name__}/{self.gid}: {self.account_name} += {self.value}"
+
+
+class InterestOrder(Order):
+    """Allows earning or paying interest based on an account value
+
+    This order stays active in the order queue permanently and monitors if the value the specified account
+    is in a specified range.
+
+    * The interest rate is understood as a simply compounded interest rate
+    * ACT/ACT day-count convention
+    * Violates the double-entry accounting principle
+
+    Reference: Brigo, Mercurio: Interest Rate Models
+    """
+
+    SECONDS_IN_A_YEAR = 60 * 60 * 24 * 365.25
+    VARIABLE_PREFIX = 'interest_'
+
+    def __init__(
+        self,
+        account_name: str,
+        interest_rate: float,
+        value_lower_bound: float = -math.inf,
+        value_upper_bound: float = math.inf,
+        gid: int = 0,
+    ):
+        super().__init__(gid)
+        self.account_name = checked_str_id(account_name)
+        self.interest_rate = checked_value(self.account_name, interest_rate, -1.0, 1.0)
+        self.value_lower_bound = checked_value(
+            self.account_name, value_lower_bound, -math.inf, math.inf
+        )
+        self.value_upper_bound = checked_value(
+            self.account_name, value_upper_bound, -math.inf, math.inf
+        )
+        if not (self.value_lower_bound <= self.value_upper_bound):
+            raise ValueError(
+                f'Empty value range provided: [{self.value_lower_bound} {self.value_upper_bound}]'
+            )
+
+        self._saved_value = None
+        self._saved_num = None
+        self._saved_value_time_stamp = None
+        self._variable_key = self.VARIABLE_PREFIX + self.account_name
+
+    def execute(self, broker_state: BrokerState) -> OrderStatus:
+        if self.account_name not in broker_state.accounts:
+            return self.status
+
+        curr_value, curr_num = broker_state.accounts[self.account_name]
+        if self._saved_value is not None and (
+            self.value_lower_bound <= self._saved_value <= self.value_upper_bound
+        ):
+            if self._saved_value_time_stamp is None:
+                raise BrokerError(
+                    f'Saved value time-stamp for account "{self.account_name}" is None'
+                )
+            time_delta_years = (
+                broker_state.now - self._saved_value_time_stamp
+            ).total_seconds() / self.SECONDS_IN_A_YEAR
+            if time_delta_years < 0.0:
+                raise BrokerError(
+                    f'Negative time delta during interest calculation for '
+                    f'account "{self.account_name}" observed'
+                )
+            interest = self._saved_value * self.interest_rate * time_delta_years
+            new_value = curr_value + interest
+            broker_state.accounts[self.account_name] = (new_value, curr_num)
+            cum_interest = broker_state.variables.get(self._variable_key, 0.0) + interest
+            broker_state.variables[self._variable_key] = cum_interest
+
+        self._saved_value, self._saved_num = broker_state.accounts[self.account_name]
+        self._saved_value_time_stamp = broker_state.now
+        return self.status
 
 
 class CfdOpenOrder(Order):
@@ -377,6 +452,7 @@ class CfdReduceOrder(Order):
         raise NotImplementedError
 
     def __init__(self, acc0: str, acc1: str, units: float, gid: int = 0):
+
         """Reduce a Cfd trade by opening an opposite trade and merging both together
 
         The meaning of the parameters corresponds to that of the CfdOpenOrder

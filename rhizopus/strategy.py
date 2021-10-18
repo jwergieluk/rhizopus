@@ -58,11 +58,6 @@ class Strategy:
         raise NotImplementedError
 
     def _get_orders(self):
-        if len(self.broker.get_active_orders()) > 0:
-            logger.info(
-                f"Skip generate_orders() for time {self.observer.now}: Active orders found."
-            )
-            return []
         self._update_price_cache()
         self.current_portfolio_weights = {
             k: v

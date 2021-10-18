@@ -1,7 +1,11 @@
+import math
+import datetime
+from collections import deque, defaultdict
+
 import pytest
 
 from rhizopus.broker import BrokerState
-from rhizopus.orders import BackwardTransferOrder, ForwardTransferOrder
+from rhizopus.orders import BackwardTransferOrder, ForwardTransferOrder, InterestOrder
 
 
 @pytest.fixture()
@@ -24,15 +28,17 @@ def samples_accounts():
         'EUR_CASH': (10000.0, 'EUR'),
         'USD_CASH': (10000.0, 'USD'),
         'XAU_BARS': (1.0, 'XAU'),
+        'XAG_BARS': (-1.0, 'XAG'),
     }
     return accounts
 
 
 @pytest.fixture(scope='function')
 def gen_sample_broker_state(sample_prices, samples_accounts):
-    def sample_broker_state():
+    def sample_broker_state() -> BrokerState:
         broker_state = BrokerState('EUR', samples_accounts)
         broker_state.current_prices.update(sample_prices)
+        broker_state.now = datetime.datetime.utcnow()
         return broker_state
 
     return sample_broker_state
@@ -204,3 +210,41 @@ def do_ping_pong(
         order_pong.execute(broker_state1)
 
     return values0, values1
+
+
+def test_interest_order(gen_sample_broker_state):
+    broker_state = gen_sample_broker_state()
+    broker_state.now = datetime.datetime(2008, 9, 15)
+
+    orders = []
+    values = defaultdict(deque)
+    for acc in broker_state.accounts:
+        value0, _ = broker_state.accounts[acc]
+        values[acc].append(value0)
+        order = InterestOrder(
+            acc, interest_rate=0.01, value_lower_bound=-abs(value0), value_upper_bound=abs(value0)
+        )
+        orders.append(order)
+        order.execute(broker_state)
+
+    # filling an order just saves the value and time stamp of the account
+    for acc in broker_state.accounts:
+        value0, _ = broker_state.accounts[acc]
+        assert value0 == values[acc][-1], acc
+        values[acc].append(value0)
+
+    # earn or pay interest
+    broker_state.now = datetime.datetime(2009, 9, 15)
+    for order in orders:
+        order.execute(broker_state)
+
+    for acc in broker_state.accounts:
+
+        value0, _ = broker_state.accounts[acc]
+
+        if values[acc][-1] < 0.0:
+            assert value0 < values[acc][-1], acc
+        elif values[acc][-1] > 0.0:
+            assert value0 > values[acc][-1], acc
+        else:
+            assert value0 == values[acc][-1], acc
