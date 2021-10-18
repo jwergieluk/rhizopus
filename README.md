@@ -59,6 +59,10 @@ See `example.py` for details.
 
 `rhizopus` does not depend on any other python package outside the Python standard library.
 
+### PyPI
+
+    pip install rhizopus
+
 ### GitHub
 
 Clone this repository and call `pip install` from the main directory:
@@ -69,7 +73,11 @@ Clone this repository and call `pip install` from the main directory:
 
 ### Conda
 
-Coming soon.
+    conda install rhizopus
+
+[![Conda Recipe](https://img.shields.io/badge/recipe-rhizopus-green.svg)](https://anaconda.org/conda-forge/rhizopus)
+[![Conda Downloads](https://img.shields.io/conda/dn/conda-forge/rhizopus.svg)](https://anaconda.org/conda-forge/rhizopus)
+[![Conda Version](https://img.shields.io/conda/vn/conda-forge/rhizopus.svg)](https://anaconda.org/conda-forge/rhizopus)
 
 ## License
 
