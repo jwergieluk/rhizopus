@@ -66,7 +66,7 @@ def calc_path_price(
     if num0 == num1:
         return 1.0
     key = (num0, num1)
-    if key in prices.keys():
+    if key in prices:
         return prices[key]
     path = find_path(prices.keys(), [], num0, num1)
     if path is None:

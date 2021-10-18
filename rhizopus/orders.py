@@ -1,6 +1,6 @@
 from typing import Dict, Union
 
-from rhizopus.broker import BrokerError, BrokerState, Order
+from rhizopus.broker import BrokerError, BrokerState, Order, OrderStatus
 from rhizopus.price_graph import get_price_from_dict
 from rhizopus.primitives import (
     Amount,
@@ -15,7 +15,7 @@ class ObserveInstrumentOrder(Order):
         super().__init__()
         self.instrument = checked_str_id(instrument)
 
-    def execute(self, broker_state: BrokerState) -> bool:
+    def execute(self, broker_state: BrokerState) -> OrderStatus:
         raise NotImplementedError
 
     def __str__(self):
@@ -28,11 +28,15 @@ class CreateAccountOrder(Order):
         self.account_name = checked_str_id(account_name)
         self.amount = checked_amount(amount)
 
-    def execute(self, broker_state: BrokerState) -> bool:
+    def execute(self, broker_state: BrokerState) -> OrderStatus:
         if self.account_name in broker_state.accounts.keys():
-            raise BrokerError(f'Account {self.account_name} already exists')
+            return self.set_status(
+                OrderStatus.REJECTED,
+                broker_state.now,
+                f'Account {self.account_name} already exists',
+            )
         broker_state.accounts[self.account_name] = self.amount
-        return True
+        return OrderStatus.EXECUTED
 
     def __repr__(self):
         return f'{self.__class__.__name__}("{self.account_name}", ({self.amount[0]}, "{self.amount[1]}"))'
@@ -46,14 +50,18 @@ class DeleteAccountOrder(Order):
         super().__init__(gid)
         self.account_name = checked_str_id(account_name)
 
-    def execute(self, broker_state: BrokerState) -> bool:
+    def execute(self, broker_state: BrokerState) -> OrderStatus:
         """Order will wait until the target account is defunded and delete it"""
         if self.account_name not in broker_state.accounts.keys():
-            raise BrokerError(f'{self.__class__.__name__}: Account {self.account_name} not found')
+            return self.set_status(
+                OrderStatus.REJECTED,
+                broker_state.now,
+                f'{self.__class__.__name__}: Account {self.account_name} not found',
+            )
         if abs(broker_state.accounts[self.account_name][0]) > 1e-12:
-            return False
+            return self.set_status(OrderStatus.ACTIVE, broker_state.now)
         del broker_state.accounts[self.account_name]
-        return True
+        return self.set_status(OrderStatus.EXECUTED, broker_state.now)
 
     def __eq__(self, other):
         return isinstance(other, self.__class__) and vars(self) == vars(other)
@@ -75,19 +83,31 @@ class TransferAllOrder(Order):
             raise ValueError(f'Source and destination accounts must be different: {self.acc0}')
         self.persistent = persistent
 
-    def execute(self, broker_state: BrokerState) -> bool:
+    def execute(self, broker_state: BrokerState) -> OrderStatus:
         if (
             self.acc0 not in broker_state.accounts.keys()
             or self.acc1 not in broker_state.accounts.keys()
         ):
-            return not self.persistent
+            return (
+                OrderStatus.ACTIVE
+                if self.persistent
+                else self.set_status(OrderStatus.EXECUTED, broker_state.now)
+            )
         amount = broker_state.accounts[self.acc0]
         if abs(amount[0]) < 1e-12:
-            return not self.persistent
+            return (
+                OrderStatus.ACTIVE
+                if self.persistent
+                else self.set_status(OrderStatus.EXECUTED, broker_state.now)
+            )
 
         order = ForwardTransferOrder(self.acc0, self.acc1, amount, gid=self.gid)
         order.execute(broker_state)
-        return not self.persistent
+        return (
+            OrderStatus.ACTIVE
+            if self.persistent
+            else self.set_status(OrderStatus.EXECUTED, broker_state.now)
+        )
 
     def __eq__(self, other):
         return (
@@ -113,11 +133,15 @@ class BackwardTransferOrder(Order):
             raise ValueError(f'Source and destination accounts must be different: {self.acc0}')
         self.amount = checked_amount(amount)
 
-    def execute(self, broker_state: BrokerState) -> bool:
+    def execute(self, broker_state: BrokerState) -> OrderStatus:
         acc0 = self.acc0
         acc1 = self.acc1
         if acc0 not in broker_state.accounts.keys() or acc1 not in broker_state.accounts.keys():
-            return False
+            return self.set_status(
+                OrderStatus.REJECTED,
+                broker_state.now,
+                f'Unable to transfer from or to a non-existent account: "{acc0}" "{acc1}"',
+            )
         value0, num0 = broker_state.accounts[acc0]
         value1, num1 = broker_state.accounts[acc1]
         order_value, order_num = self.amount
@@ -129,7 +153,7 @@ class BackwardTransferOrder(Order):
             price_a = get_price_from_dict(broker_state.current_prices, num1, num0)
             price_b = get_price_from_dict(broker_state.current_prices, order_num, num1)
         if price_a is None or price_b is None:
-            return False
+            return OrderStatus.ACTIVE
         if price_a < 0.0 or price_b < 0.0:
             raise BrokerError(
                 f'Negative prices for {num0} {num1} {order_num} detected: {price_a} {price_b}'
@@ -142,7 +166,7 @@ class BackwardTransferOrder(Order):
             new_acc1 = (value1 + order_value * price_b, num1)
         broker_state.accounts[acc0] = new_acc0
         broker_state.accounts[acc1] = new_acc1
-        return True
+        return self.set_status(OrderStatus.EXECUTED, broker_state.now)
 
     def __eq__(self, other):
         return transfer_order_comparator(self, other)
@@ -164,12 +188,14 @@ class ForwardTransferOrder(Order):
             raise ValueError(f'Source and destination accounts must be different: {self.acc0}')
         self.amount = checked_amount(amount)
 
-    def execute(self, broker_state: BrokerState) -> bool:
+    def execute(self, broker_state: BrokerState) -> OrderStatus:
         acc0 = self.acc0
         acc1 = self.acc1
         if acc0 not in broker_state.accounts.keys() or acc1 not in broker_state.accounts.keys():
-            raise BrokerError(
-                f'Unable to transfer from or to a non-existent account: "{acc0}" "{acc1}"'
+            return self.set_status(
+                OrderStatus.REJECTED,
+                broker_state.now,
+                f'Unable to transfer from or to a non-existent account: "{acc0}" "{acc1}"',
             )
         value0, num0 = broker_state.accounts[acc0]
         value1, num1 = broker_state.accounts[acc1]
@@ -182,7 +208,7 @@ class ForwardTransferOrder(Order):
             price_a = get_price_from_dict(broker_state.current_prices, order_num, num0)
             price_b = get_price_from_dict(broker_state.current_prices, num1, num0)
         if price_a is None or price_b is None:
-            return False
+            return OrderStatus.ACTIVE
         if price_a < 0.0 or price_b < 0.0:
             raise BrokerError(
                 f'Negative prices for {num0} {num1} {order_num} detected: {price_a} {price_b}'
@@ -197,7 +223,7 @@ class ForwardTransferOrder(Order):
             new_acc1 = (value1 + order_value * price_a / price_b, num1)
         broker_state.accounts[acc0] = new_acc0
         broker_state.accounts[acc1] = new_acc1
-        return True
+        return self.set_status(OrderStatus.EXECUTED, broker_state.now)
 
     def __eq__(self, other):
         return transfer_order_comparator(self, other)
@@ -229,12 +255,12 @@ class AddToVariableOrder(Order):
         value = checked_value(self.variable_name, value)
         self.value = value
 
-    def execute(self, broker_state: BrokerState) -> bool:
+    def execute(self, broker_state: BrokerState) -> OrderStatus:
         if self.variable_name in broker_state.variables.keys():
             broker_state.variables[self.variable_name] += self.value
         else:
             broker_state.variables[self.variable_name] = self.value
-        return True
+        return self.set_status(OrderStatus.EXECUTED, broker_state.now)
 
     def __str__(self):
         if self.value < 0:
@@ -251,9 +277,9 @@ class UpdateVariablesOrder(Order):
         assert len(vars_update) > 0
         self.vars_update = vars_update
 
-    def execute(self, broker_state: BrokerState) -> bool:
+    def execute(self, broker_state: BrokerState) -> OrderStatus:
         broker_state.variables.update(self.vars_update)
-        return True
+        return self.set_status(OrderStatus.EXECUTED, broker_state.now)
 
     def __str__(self):
         return f"{self.__class__.__name__}/{self.gid}: " + ' '.join(
@@ -268,12 +294,14 @@ class AddToAccountBalanceOrder(Order):
         value = checked_value(self.account_name, value)
         self.value = value
 
-    def execute(self, broker_state: BrokerState) -> bool:
+    def execute(self, broker_state: BrokerState) -> OrderStatus:
         if self.account_name not in broker_state.accounts.keys():
-            raise BrokerError(f'Account {self.account_name} not found.')
+            return self.set_status(
+                OrderStatus.REJECTED, broker_state.now, f'Account {self.account_name} not found.'
+            )
         old_value, num = broker_state.accounts[self.account_name]
         broker_state.accounts[self.account_name] = (old_value + self.value, num)
-        return True
+        return self.set_status(OrderStatus.EXECUTED, broker_state.now)
 
     def __str__(self):
         if self.value < 0:
@@ -282,7 +310,7 @@ class AddToAccountBalanceOrder(Order):
 
 
 class CfdOpenOrder(Order):
-    def execute(self, broker_state: BrokerState) -> bool:
+    def execute(self, broker_state: BrokerState) -> OrderStatus:
         raise NotImplementedError
 
     def __init__(self, num0: str, num1: str, units: float, gid: int = 0):
@@ -318,7 +346,7 @@ class CfdOpenOrder(Order):
 
 
 class CfdCloseOrder(Order):
-    def execute(self, broker_state: BrokerState) -> bool:
+    def execute(self, broker_state: BrokerState) -> OrderStatus:
         raise NotImplementedError
 
     def __init__(self, acc0: str, acc1: str, gid: int = 0):
@@ -345,7 +373,7 @@ class CfdCloseOrder(Order):
 
 
 class CfdReduceOrder(Order):
-    def execute(self, broker_state: BrokerState) -> bool:
+    def execute(self, broker_state: BrokerState) -> OrderStatus:
         raise NotImplementedError
 
     def __init__(self, acc0: str, acc1: str, units: float, gid: int = 0):

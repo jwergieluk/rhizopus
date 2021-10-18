@@ -1,5 +1,5 @@
 import pytest
-from rhizopus.broker import BrokerState, BrokerError
+from rhizopus.broker import BrokerState, BrokerError, OrderStatus
 from rhizopus.orders import (
     CfdOpenOrder,
     CfdCloseOrder,
@@ -67,17 +67,18 @@ def test_create_account_order1():
     broker_state = BrokerState(default_numeraire='EUR', accounts={'EUR': (0, 'EUR')}, variables={})
 
     order = CreateAccountOrder('USD', (0.0, 'USD'))
-    order.execute(broker_state)
+    status = order.execute(broker_state)
     assert 'USD' in broker_state.accounts.keys()
     assert broker_state.accounts['USD'], (0.0, 'USD')
+    assert status == OrderStatus.EXECUTED
 
 
 def test_create_account_order2():
     broker_state = BrokerState(default_numeraire='EUR', accounts={'EUR': (0, 'EUR')}, variables={})
     order = CreateAccountOrder('EUR', (0.0, 'USD'))
 
-    with pytest.raises(BrokerError):
-        order.execute(broker_state)
+    status = order.execute(broker_state)
+    assert status == OrderStatus.REJECTED
 
 
 def test_add_to_variable1():

@@ -35,7 +35,7 @@ def test_transfer_order1():
         pass
 
     accounts = broker.get_accounts()
-    assert len(accounts.keys()) == 3
+    assert len(accounts) == 3
     assert accounts['EUR_CASH'] == (90.0, 'EUR')
     assert accounts['USD_CASH'] == (100.0, 'USD')
     assert accounts['JPY_CASH'] == (0.0, 'JPY')
@@ -47,7 +47,7 @@ def test_transfer_order2():
     """
     start_time = datetime.datetime(2000, 1, 1)
     series = {('EUR', 'USD'): None, ('USD', 'JPY'): None}
-    for key in series.keys():
+    for key in series:
         const_price = random.choice([2, 4, 8, 10])
         series[key] = [(start_time + datetime.timedelta(days=t), const_price) for t in range(20)]
     series_store = SeriesStoreFromDict(series)
@@ -82,7 +82,7 @@ def test_transfer_order2():
 def test_transaction_cost_filter():
     start_time = datetime.datetime(2000, 1, 1)
     series = {('EUR', 'USD'): None, ('USD', 'JPY'): None}
-    for key in series.keys():
+    for key in series:
         series[key] = [
             (
                 start_time + datetime.timedelta(days=t),
@@ -108,7 +108,7 @@ def test_transaction_cost_filter():
     broker.fill_order(BackwardTransferOrder('EUR_CASH', 'USD_CASH', (5.0, 'EUR')))
     broker.next()
 
-    assert 'tc' in broker.get_variables().keys()
+    assert 'tc' in broker.get_variables()
     assert broker.get_variables()['tc'] == 10.0
 
 

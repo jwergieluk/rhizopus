@@ -2,6 +2,7 @@ import collections
 import logging
 from abc import ABC
 from collections import deque
+import datetime
 from enum import Enum, auto
 from types import MappingProxyType
 from typing import Dict, KeysView, List, Mapping, Optional, Tuple, Union
@@ -53,8 +54,8 @@ class BrokerState:
         assert default_numeraire, "Numeraire has to be a non-empty string"
         self.accounts = dict(accounts) if accounts else {}
         self.variables = dict(variables) if variables else {}
-        assert all(self.accounts.keys()), "Account names must be non-empty strings"
-        assert all(self.variables.keys()), "Variable names must be non-empty strings"
+        assert all(self.accounts), "Account names must be non-empty strings"
+        assert all(self.variables), "Variable names must be non-empty strings"
         self.current_prices = {}
         self.recent_prices = {}
         self.default_numeraire = default_numeraire
@@ -62,6 +63,7 @@ class BrokerState:
         self.time_index = 0
         self.active_orders = deque(maxlen=50000)
         self.executed_orders = deque(maxlen=100000)
+        self.rejected_orders = deque(maxlen=5000)
 
     def check(self):
         """Self-check"""
@@ -74,9 +76,8 @@ class BrokerState:
 
 
 class OrderStatus(Enum):
-    NEW = auto()
-    PROCESSING = auto()
-    ACCEPTED = auto()
+    ACTIVE = auto()
+    EXECUTED = auto()
     REJECTED = auto()
 
 
@@ -89,16 +90,32 @@ class Order:
 
     def __init__(self, gid: int = 0):
         self.age = 0
-        self.status = OrderStatus.NEW
+        self.status = OrderStatus.ACTIVE
+        self.status_time_stamp = (
+            datetime.datetime.min
+        )  # time stamp at which the current status was set
+        self.status_comment: str = ''
         self.transaction_id = None
         self.gid = gid
 
-    def execute(self, broker_state: BrokerState) -> bool:
+    def execute(self, broker_state: BrokerState) -> OrderStatus:
         """Order execution in the simulation environment
 
-        Returns whether the order can be moved to the executed order queue.
+        Returns the order status resulting from the execution attempt.
         """
         raise NotImplementedError
+
+    def set_status(
+        self, new_status: OrderStatus, time_stamp: datetime.datetime, comment: str = ''
+    ) -> OrderStatus:
+        if self.status != new_status and (
+            self.status in (OrderStatus.EXECUTED, OrderStatus.REJECTED)
+        ):
+            raise ValueError(f'Forbidden status update requested: {self.status} -> {new_status}')
+        self.status = new_status
+        self.status_time_stamp = time_stamp
+        self.status_comment = comment
+        return self.status
 
     def __repr__(self):
         return f"{self.__class__.__name__}()"
@@ -158,6 +175,7 @@ class Broker:
         logger.info(
             f'T{self._broker_state.time_index} {self._broker_state.now}: Fill: {str(order)}'
         )
+        order.set_status(OrderStatus.ACTIVE, self.get_time())
         self._broker_conn.fill_order(order, self._broker_state)
 
     def get_value_portfolio(self, num0: str = '') -> Optional[float]:

@@ -84,11 +84,13 @@ class BrokerObserver:
                     )
             if self.rec_acc_weights:
                 for account, weight in self.broker.get_weight_all_accounts().items():
-                    self.recorder.save(self.now, ('account', account, 'weight'), weight)
+                    if isinstance(weight, float):
+                        self.recorder.save(self.now, ('account', account, 'weight'), weight)
 
         if self.rec_acc_navs:
             for account, position_nav in self.broker.get_value_all_accounts().items():
-                self.recorder.save(self.now, ('account', account, 'nav'), position_nav)
+                if isinstance(position_nav, float):
+                    self.recorder.save(self.now, ('account', account, 'nav'), position_nav)
         if self.rec_vars:
             for key, value in self.broker.get_variables().items():
                 if isinstance(value, float):

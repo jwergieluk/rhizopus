@@ -5,7 +5,7 @@ import operator
 from collections import deque, defaultdict
 from typing import Optional, List, Union, Iterable, Tuple, Set, Dict
 
-from rhizopus.broker import AbstractBrokerConn, BrokerError, BrokerState
+from rhizopus.broker import AbstractBrokerConn, BrokerError, BrokerState, OrderStatus
 from rhizopus.orders import (
     AddToAccountBalanceOrder,
     AddToVariableOrder,
@@ -54,7 +54,7 @@ class SeriesStoreFromDict(SeriesStoreBase):
 
     def edges(self) -> Iterable[Tuple[str, str]]:
         """Return all tradeable edges (numeraire pairs)"""
-        return set(self._data.keys())
+        return set(self._data)
 
     def vertices(self) -> Set[str]:
         return set([edge[0] for edge in self.edges()] + [edge[1] for edge in self.edges()])
@@ -64,7 +64,7 @@ class SeriesStoreFromDict(SeriesStoreBase):
         inverse_ts = {}
         for k, v in self._data.items():
             key = (k[1], k[0])
-            if key not in self._data.keys():
+            if key not in self._data:
                 inverse_ts[key] = [(t, 1.0 / w) for t, w in v]
         self._data.update(inverse_ts)
 
@@ -125,8 +125,8 @@ class BrokerSimulator(AbstractBrokerConn):
             self._prices[(num0, num1)] = dict(series)
 
         self._time_grid = set()
-        for key in self._prices.keys():
-            for times in self._prices[key].keys():
+        for key in self._prices:
+            for times in self._prices[key]:
                 self._time_grid.add(times)
         self._time_grid = list(sorted(self._time_grid))
         self._time_index = 0
@@ -150,35 +150,34 @@ class BrokerSimulator(AbstractBrokerConn):
         broker_state.default_numeraire = self._default_numeraire
 
         self._update_current_prices(broker_state)
-        try:
-            self._process_orders(broker_state)
-        except BrokerError:
-            raise
+        self._process_orders(broker_state)
         return broker_state.now
 
     def _update_current_prices(self, broker_state: BrokerState) -> None:
         broker_state.current_prices.clear()
-        for key in self._prices.keys():
-            if broker_state.now in self._prices[key].keys():
+        for key in self._prices:
+            if broker_state.now in self._prices[key]:
                 broker_state.current_prices[key] = self._prices[key][broker_state.now]
 
     def _process_orders(self, broker_state: BrokerState) -> None:
         postponed_orders = []
         for order in sorted(broker_state.active_orders, key=lambda o: o.age):
-            processed = order.execute(broker_state)
+            new_status = order.execute(broker_state)
             time_str = broker_state.now.strftime('%Y-%m-%d %H:%M:%S')
-            if processed:
+            if new_status == OrderStatus.EXECUTED:
                 broker_state.executed_orders.append(order)
                 logging.getLogger(__name__).info(
                     f"{time_str} T{broker_state.time_index} : Exec: {str(order)}"
                 )
-            else:
+            elif new_status == OrderStatus.ACTIVE:
                 order.age += 1
                 if order.age % 128 == 0:
                     logging.getLogger(__name__).debug(
                         f"{time_str} T{broker_state.time_index}: Delay: {str(order)}"
                     )
                 postponed_orders.append(order)
+            else:
+                broker_state.rejected_orders.append(order)
 
         broker_state.active_orders.clear()
         broker_state.active_orders.extend(postponed_orders)

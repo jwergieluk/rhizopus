@@ -26,7 +26,7 @@ def test_path_price():
         ('USD', 'XAU'): spread * 1.0 / (1000.0 * 1.2),
     }
 
-    for num0, num1 in prices.keys():
+    for num0, num1 in prices:
         assert calc_path_price(prices, num0, num1) == prices[(num0, num1)]
 
     assert calc_path_price(prices, 'XAU', 'EUR') == prices[('XAU', 'USD')] * prices[('USD', 'EUR')]

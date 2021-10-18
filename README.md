@@ -1,5 +1,7 @@
 # rhizopus
 
+[![Conda Version](https://img.shields.io/conda/vn/conda-forge/rhizopus.svg)](https://anaconda.org/conda-forge/rhizopus)
+
 `rhizopus` is a Python trading simulation framework and a backtesting tool. It
 can be used to construct broker simulators for backtesting with historical 
 data, as well as for live trading. Its main goal is to provide a simple unified 
