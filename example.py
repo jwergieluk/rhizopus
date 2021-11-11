@@ -2,7 +2,7 @@ import datetime
 import logging
 import math
 from io import StringIO
-from typing import Dict, Optional, Sequence, Iterable, Tuple, List
+from typing import Dict, Optional, Sequence, Iterable, List
 
 import numpy as np
 import pandas as pd
@@ -16,6 +16,7 @@ from rhizopus.broker_simulator import (
     SeriesStoreFromDict,
 )
 from rhizopus.orders import CreateAccountOrder, InterestOrder
+from rhizopus.primitives import checked_str_id
 from rhizopus.strategy import Strategy
 
 from rhizopus.broker import Broker, Order
@@ -63,6 +64,33 @@ def get_series_store(default_numeraire: str) -> SeriesStoreBase:
     return store
 
 
+class VariableDividedByInitialPortfolioValueEvaluator:
+    """An example evaluator dividing a variable value by initial portfolio value in default numeraire.
+
+    A evaluator is a function-like object mapping a broker to a float.
+    """
+
+    def __init__(self, variable_name: str):
+        self.variable_name = checked_str_id(variable_name)
+        self.initial_nav = None
+
+    def __call__(self, broker: Broker) -> Optional[float]:
+        if self.variable_name not in broker.variables:
+            return None
+        variable_value = broker.variables[self.variable_name]
+        if variable_value is None or not math.isfinite(variable_value):
+            return None
+
+        value_portfolio = broker.get_value_portfolio()
+        if self.initial_nav is None and value_portfolio is not None:
+            if not math.isfinite(value_portfolio) or value_portfolio < 1e-6:
+                return None
+            self.initial_nav = value_portfolio
+        if self.initial_nav is None:
+            return None
+        return variable_value / self.initial_nav
+
+
 class ConstantMixStrategy(Strategy):
     """Reallocates a portfolio to a fixed set of weights
 
@@ -72,8 +100,8 @@ class ConstantMixStrategy(Strategy):
 
     """
 
-    def __init__(self, broker: Broker, target_alloc: Dict[str, float]):
-        super().__init__(broker, max_rel_alloc_deviation=0.01)
+    def __init__(self, broker: Broker, observer: BrokerObserver, target_alloc: Dict[str, float]):
+        super().__init__(broker, observer, max_rel_alloc_deviation=0.01)
         self.target_alloc = target_alloc
 
     def get_target_allocation(self) -> Dict[str, float]:
@@ -105,7 +133,7 @@ def main():
     ]
     initial_orders.extend(
         [
-            # earn 50bps positive cash account value
+            # earn 50bps on positive cash account value
             InterestOrder(
                 'EUR', interest_rate=0.005, value_lower_bound=0.0, value_upper_bound=math.inf
             ),
@@ -116,8 +144,12 @@ def main():
         ]
     )
     broker = Broker(broker_simulator, initial_orders=initial_orders)
+    observer = BrokerObserver(broker)
+    observer.add_evaluator(
+        'rel_interest_EUR', VariableDividedByInitialPortfolioValueEvaluator('interest_EUR')
+    )
 
-    strategy = ConstantMixStrategy(broker, target_alloc)
+    strategy = ConstantMixStrategy(broker, observer, target_alloc)
     # On the first day we just observe the market prices and do nothing. Trading starts on the next day.
     trading_start_time = series_store.get_min_time() + datetime.timedelta(days=1)
     strategy.run(trading_start_time, max_iterations=100)

@@ -1,3 +1,4 @@
+import itertools
 from functools import reduce
 from operator import mul
 from typing import Iterable, List, Mapping, Optional, Set, Tuple
@@ -88,3 +89,33 @@ def calc_total_nav(
             return p
         running_sum += val * calc_path_price(prices, num, target_num)
     return running_sum
+
+
+def price_graph_is_full(
+    prices: Mapping[Tuple[str, str], float],
+    cash_nums: Iterable[str],
+    asset_nums: Iterable[str],
+) -> bool:
+    """Check if we can trade between all possible cash numeraire pairs and between all cash-asset numeraire pairs"""
+
+    cash_nums = set(cash_nums)
+    asset_nums = set(asset_nums)
+    if not cash_nums:
+        raise ValueError(f'No cash numeraires provided')
+
+    for cash_num0, cash_num1 in itertools.combinations(cash_nums, 2):
+        if (cash_num0, cash_num1) not in prices:
+            return False
+        if (cash_num1, cash_num0) not in prices:
+            return False
+
+    if not asset_nums:
+        return True
+
+    for cash_num in cash_nums:
+        for asset_num in asset_nums:
+            if (cash_num, asset_num) not in prices:
+                return False
+            if (asset_num, cash_num) not in prices:
+                return False
+    return True

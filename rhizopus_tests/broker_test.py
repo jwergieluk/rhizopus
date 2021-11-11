@@ -1,6 +1,6 @@
 import random
 import pytest
-from rhizopus.broker import BrokerState, BrokerStateError
+from rhizopus.broker import BrokerState, BrokerStateError, NullBrokerConn, Broker
 
 
 @pytest.fixture()
@@ -29,3 +29,26 @@ def test_wrong_broker_state_time_index(sample_broker_state, time_index):
     broker_state.time_index = time_index
     with pytest.raises(BrokerStateError):
         broker_state.check()
+
+
+def test_account_value_with_price_spread_short_position():
+    """Test whether bid-ask spreads are correctly used when valuating short positions"""
+
+    cash_num = 'EUR'
+    capital = 0.0
+    accounts = {cash_num: (capital, cash_num), 'NUM_LONG': (1.0, 'NUM'), 'NUM_SHORT': (-1.0, 'NUM')}
+    broker_state = BrokerState(cash_num, accounts)
+
+    prices = {
+        ('NUM', cash_num): 1.0,
+        (cash_num, 'NUM'): 0.5,
+    }
+    broker_state.current_prices = prices
+    broker_state.recent_prices = dict(broker_state.current_prices)
+    broker = Broker(NullBrokerConn(), [], broker_state)
+
+    value_long = broker.get_value_account('NUM_LONG')
+    value_short = broker.get_value_account('NUM_SHORT')
+
+    assert value_long < abs(value_short)
+    assert broker.get_value_portfolio() < 0.0

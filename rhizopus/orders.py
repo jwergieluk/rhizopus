@@ -37,7 +37,7 @@ class CreateAccountOrder(Order):
                 f'Account {self.account_name} already exists',
             )
         broker_state.accounts[self.account_name] = self.amount
-        return OrderStatus.EXECUTED
+        return self.set_status(OrderStatus.EXECUTED, broker_state.now)
 
     def __repr__(self):
         return f'{self.__class__.__name__}("{self.account_name}", ({self.amount[0]}, "{self.amount[1]}"))'
@@ -133,6 +133,7 @@ class BackwardTransferOrder(Order):
         if self.acc0 == self.acc1:
             raise ValueError(f'Source and destination accounts must be different: {self.acc0}')
         self.amount = checked_amount(amount)
+        self.price_a, self.price_b = math.nan, math.nan
 
     def execute(self, broker_state: BrokerState) -> OrderStatus:
         acc0 = self.acc0
@@ -148,23 +149,23 @@ class BackwardTransferOrder(Order):
         order_value, order_num = self.amount
 
         if order_value >= 0.0:
-            price_a = get_price_from_dict(broker_state.current_prices, num0, num1)
-            price_b = get_price_from_dict(broker_state.current_prices, num1, order_num)
+            self.price_a = get_price_from_dict(broker_state.current_prices, num0, num1)
+            self.price_b = get_price_from_dict(broker_state.current_prices, num1, order_num)
         else:
-            price_a = get_price_from_dict(broker_state.current_prices, num1, num0)
-            price_b = get_price_from_dict(broker_state.current_prices, order_num, num1)
-        if price_a is None or price_b is None:
+            self.price_a = get_price_from_dict(broker_state.current_prices, num1, num0)
+            self.price_b = get_price_from_dict(broker_state.current_prices, order_num, num1)
+        if self.price_a is None or self.price_b is None:
             return OrderStatus.ACTIVE
-        if price_a < 0.0 or price_b < 0.0:
+        if self.price_a < 0.0 or self.price_b < 0.0:
             raise BrokerError(
-                f'Negative prices for {num0} {num1} {order_num} detected: {price_a} {price_b}'
+                f'Negative prices for {num0} {num1} {order_num} detected: {self.price_a} {self.price_b}'
             )
         if order_value >= 0.0:
-            new_acc0 = (value0 - order_value / (price_a * price_b), num0)
-            new_acc1 = (value1 + order_value / price_b, num1)
+            new_acc0 = (value0 - order_value / (self.price_a * self.price_b), num0)
+            new_acc1 = (value1 + order_value / self.price_b, num1)
         else:
-            new_acc0 = (value0 - order_value * price_a * price_b, num0)
-            new_acc1 = (value1 + order_value * price_b, num1)
+            new_acc0 = (value0 - order_value * self.price_a * self.price_b, num0)
+            new_acc1 = (value1 + order_value * self.price_b, num1)
         broker_state.accounts[acc0] = new_acc0
         broker_state.accounts[acc1] = new_acc1
         return self.set_status(OrderStatus.EXECUTED, broker_state.now)
@@ -188,6 +189,7 @@ class ForwardTransferOrder(Order):
         if self.acc0 == self.acc1:
             raise ValueError(f'Source and destination accounts must be different: {self.acc0}')
         self.amount = checked_amount(amount)
+        self.price_a, self.price_b = math.nan, math.nan
 
     def execute(self, broker_state: BrokerState) -> OrderStatus:
         acc0 = self.acc0
@@ -203,25 +205,25 @@ class ForwardTransferOrder(Order):
         order_value, order_num = self.amount
 
         if order_value >= 0.0:
-            price_a = get_price_from_dict(broker_state.current_prices, num0, order_num)
-            price_b = get_price_from_dict(broker_state.current_prices, num0, num1)
+            self.price_a = get_price_from_dict(broker_state.current_prices, num0, order_num)
+            self.price_b = get_price_from_dict(broker_state.current_prices, num0, num1)
         else:
-            price_a = get_price_from_dict(broker_state.current_prices, order_num, num0)
-            price_b = get_price_from_dict(broker_state.current_prices, num1, num0)
-        if price_a is None or price_b is None:
+            self.price_a = get_price_from_dict(broker_state.current_prices, order_num, num0)
+            self.price_b = get_price_from_dict(broker_state.current_prices, num1, num0)
+        if self.price_a is None or self.price_b is None:
             return OrderStatus.ACTIVE
-        if price_a < 0.0 or price_b < 0.0:
+        if self.price_a < 0.0 or self.price_b < 0.0:
             raise BrokerError(
-                f'Negative prices for {num0} {num1} {order_num} detected: {price_a} {price_b}'
+                f'Negative prices for {num0} {num1} {order_num} detected: {self.price_a} {self.price_b}'
             )
         if order_value >= 0.0:
-            # Send the wealth needed to buy 'amount' from acc0 to acc1
-            new_acc0 = (value0 - order_value / price_a, num0)
-            new_acc1 = (value1 + order_value * price_b / price_a, num1)
+            # Send the wealth needed to buy the specified 'amount' from acc0 to acc1
+            new_acc0 = (value0 - order_value / self.price_a, num0)
+            new_acc1 = (value1 + order_value * self.price_b / self.price_a, num1)
         else:
             # The amount is sold and transferred to acc0. This is financed using acc1.
-            new_acc0 = (value0 - order_value * price_a, num0)
-            new_acc1 = (value1 + order_value * price_a / price_b, num1)
+            new_acc0 = (value0 - order_value * self.price_a, num0)
+            new_acc1 = (value1 + order_value * self.price_a / self.price_b, num1)
         broker_state.accounts[acc0] = new_acc0
         broker_state.accounts[acc1] = new_acc1
         return self.set_status(OrderStatus.EXECUTED, broker_state.now)
@@ -381,7 +383,7 @@ class InterestOrder(Order):
 
         self._saved_value, self._saved_num = broker_state.accounts[self.account_name]
         self._saved_value_time_stamp = broker_state.now
-        return self.status
+        return self.set_status(OrderStatus.ACTIVE, broker_state.now)
 
 
 class CfdOpenOrder(Order):

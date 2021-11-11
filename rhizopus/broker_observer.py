@@ -96,6 +96,16 @@ class BrokerObserver:
                 if isinstance(value, float):
                     self.recorder.save(self.now, ('var', key), float(value))
 
+        for evaluator_key, evaluator in self.evaluators.items():
+            value = evaluator(self.broker)
+            if isinstance(value, float):
+                evaluator_key = (
+                    ('var', *evaluator_key)
+                    if isinstance(evaluator_key, tuple)
+                    else ('var', evaluator_key)
+                )
+                self.recorder.save(self.now, evaluator_key, float(value))
+
     def get_dict(self, key: Union[str, Sequence[str]]) -> Optional[Mapping[Time, float]]:
         return self.recorder.get_dict(key)
 

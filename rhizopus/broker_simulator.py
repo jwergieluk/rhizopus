@@ -5,6 +5,7 @@ import operator
 from collections import deque, defaultdict
 from typing import Optional, List, Union, Iterable, Tuple, Set, Dict
 
+from rhizopus.primitives import Time
 from rhizopus.broker import AbstractBrokerConn, BrokerError, BrokerState, OrderStatus
 from rhizopus.orders import (
     AddToAccountBalanceOrder,
@@ -139,7 +140,7 @@ class BrokerSimulator(AbstractBrokerConn):
     def get_default_numeraire(self) -> Optional[str]:
         return self._default_numeraire
 
-    def next(self, broker_state: BrokerState) -> Optional[datetime.datetime]:
+    def next(self, broker_state: BrokerState) -> Optional[Time]:
         self._time_index += 1
         if len(self._time_grid) < self._time_index:
             raise BrokerError('Backtest end of time reached')

@@ -1,16 +1,19 @@
 import collections
 import logging
+import math
 from abc import ABC
 from collections import deque
 import datetime
 from enum import Enum, auto
 from types import MappingProxyType
-from typing import Dict, KeysView, List, Mapping, Optional, Tuple, Union
+from typing import Dict, KeysView, List, Mapping, Optional, Tuple, Union, Iterable
 
-from rhizopus.price_graph import calc_path_price, get_price_from_dict
-from rhizopus.primitives import Time, Amount, raise_for_time
+from rhizopus.price_graph import calc_path_price, get_price_from_dict, price_graph_is_full
+from rhizopus.primitives import Time, Amount, raise_for_time, raise_for_str_id
 
 logger = logging.getLogger(__name__)
+# disable weights calculation for any portfolio with NAV below the following value:
+NEGLIGIBLE_POSITIVE_PORTFOLIO_NAV = 1e-2
 
 
 class BrokerError(Exception):
@@ -51,14 +54,18 @@ class BrokerState:
         accounts: Optional[Dict[str, Amount]] = None,
         variables: Optional[Dict[str, Union[float, str]]] = None,
     ):
-        assert default_numeraire, "Numeraire has to be a non-empty string"
+        if not default_numeraire:
+            raise BrokerStateError("Numeraire has to be a non-empty string")
+        self.default_numeraire = default_numeraire
         self.accounts = dict(accounts) if accounts else {}
         self.variables = dict(variables) if variables else {}
-        assert all(self.accounts), "Account names must be non-empty strings"
-        assert all(self.variables), "Variable names must be non-empty strings"
+        for acc in self.accounts:
+            raise_for_str_id(acc)
+        for v in self.variables:
+            raise_for_str_id(v)
         self.current_prices = {}
         self.recent_prices = {}
-        self.default_numeraire = default_numeraire
+
         self.now = None
         self.time_index = 0
         self.active_orders = deque(maxlen=50000)
@@ -66,7 +73,13 @@ class BrokerState:
         self.rejected_orders = deque(maxlen=5000)
 
     def check(self):
-        """Self-check"""
+        """Self-check
+
+        More checks to implement:
+        * Check if price graphs are arbitrage free
+        * Add properties for default_numeraire, now, and time_index to make sure they are set properly. This is
+          cheaper than checking every iteration.
+        """
         if not (type(self.default_numeraire) == str and self.default_numeraire):
             raise BrokerStateError(f'Wrong default numeraire: {self.default_numeraire}')
         if not (type(self.time_index) == int and self.time_index >= 0):
@@ -125,28 +138,57 @@ class Order:
 
 
 class AbstractBrokerConn(ABC):
-    def next(self, broker_state: BrokerState):
+    def next(self, broker_state: BrokerState) -> Optional[Time]:
         """Advance the time by one tick. Updates prices, executes orders, etc"""
 
-    def fill_order(self, order: Order, broker_state: BrokerState):
+    def fill_order(self, order: Order, broker_state: BrokerState) -> None:
         """Add an order to the queue"""
 
     def get_default_numeraire(self) -> Optional[str]:
         """Returns the default numeraire"""
 
 
+class NullBrokerConn(AbstractBrokerConn):
+    """A minimal broker connection class that doesn't really do anything, but it's useful for testing"""
+
+    def __init__(self):
+        self.default_numeraire = 'EUR'
+
+    def next(self, broker_state: BrokerState) -> Optional[Time]:
+        self.default_numeraire = broker_state.default_numeraire
+        broker_state.now = datetime.datetime.utcnow()
+        broker_state.time_index = broker_state.time_index + 1 if broker_state.time_index else 0
+        return broker_state.now
+
+    def fill_order(self, order: Order, broker_state: BrokerState) -> None:
+        return None
+
+    def get_default_numeraire(self) -> Optional[str]:
+        return self.default_numeraire
+
+
 class Broker:
     """Wrapper class defining the broker interface
 
     Trading strategies talk to this class.
+
+    TODOs:
+    * Add property caching
     """
 
     _broker_state: BrokerState
 
-    def __init__(self, broker_conn: AbstractBrokerConn, initial_orders: List[Order]):
+    def __init__(
+        self,
+        broker_conn: AbstractBrokerConn,
+        initial_orders: List[Order],
+        broker_state: Optional[BrokerState] = None,
+    ):
         self._broker_conn = broker_conn
         self._no_postponed_orders_threshold = 8
-        self._broker_state = BrokerState(broker_conn.get_default_numeraire())
+        self._broker_state = (
+            broker_state if broker_state else BrokerState(broker_conn.get_default_numeraire())
+        )
         self._broker_state.active_orders.extend(initial_orders)
         self.next()  # initialize the broker_state and execute initial orders
 
@@ -168,7 +210,7 @@ class Broker:
             self._no_postponed_orders_threshold *= 2
         return self._broker_state.now
 
-    def fill_order(self, order: Order):
+    def fill_order(self, order: Order) -> None:
         assert self._broker_state.default_numeraire, 'Default numeraire not set'
         assert self._broker_state.now, 'Now is not set'
 
@@ -191,52 +233,76 @@ class Broker:
         """Calc recent value of an account"""
         if num0 == '':
             num0 = self.get_default_numeraire()
-        accounts = self.get_accounts()
-        if acc not in accounts.keys():
+        if acc not in self.accounts:
             return None
-        last_price = calc_path_price(self.get_recent_prices(), accounts[acc][1], num0)
-        if last_price is None:
+        acc_value, acc_num = self.accounts[acc]
+        if acc_value < 0.0:
+            last_price = 1.0 / calc_path_price(self.get_recent_prices(), num0, acc_num)
+        else:
+            last_price = calc_path_price(self.get_recent_prices(), acc_num, num0)
+        if last_price is None or not math.isfinite(last_price):
             return None
-        return accounts[acc][0] * last_price
+        return acc_value * last_price
+
+    @property
+    def recent_value_all_accounts(self):
+        return self.get_value_all_accounts(self.get_default_numeraire())
 
     def get_value_all_accounts(self, num0: str = '') -> Dict[str, Optional[float]]:
         """Calc recent value for all accounts using recent prices"""
         if num0 == '':
             num0 = self.get_default_numeraire()
-        values = {}
-        accounts = self.get_accounts()
-        for name, amount in accounts.items():
-            last_price = calc_path_price(self.get_recent_prices(), amount[1], num0)
-            if last_price is None:
-                values[name] = None
-            else:
-                values[name] = amount[0] * last_price
+        values = {acc: self.get_value_account(acc, num0) for acc in self.accounts}
         return values
+
+    @property
+    def recent_weights_all_accounts(self) -> Dict[str, Optional[float]]:
+        return self.get_weight_all_accounts()
 
     def get_weight_all_accounts(self) -> Dict[str, Optional[float]]:
         """Calc recent weights for all accounts"""
         position_values = self.get_value_all_accounts()
         portfolio_value = self.get_value_portfolio()
-        if portfolio_value is not None and abs(portfolio_value) < 1e-8:
-            portfolio_value = None
-        if portfolio_value is None:
+        if portfolio_value is None or portfolio_value < NEGLIGIBLE_POSITIVE_PORTFOLIO_NAV:
             return {key: None for key in position_values.keys()}
         return {
             key: None if value is None else value / portfolio_value
             for key, value in position_values.items()
         }
 
-    def get_active_orders(self):
-        return self._broker_state.active_orders
+    def get_account_weight(self, account_name: str) -> Optional[float]:
+        portfolio_value = self.get_value_portfolio()
+        if portfolio_value is None or portfolio_value < NEGLIGIBLE_POSITIVE_PORTFOLIO_NAV:
+            return None
+        return self.get_value_account(account_name) / portfolio_value
 
-    def get_executed_orders(self):
-        return self._broker_state.executed_orders
+    def get_active_orders(self) -> List[Order]:
+        return list(self._broker_state.active_orders)
+
+    def get_executed_orders(self) -> List[Order]:
+        return list(self._broker_state.executed_orders)
 
     def get_current_price(self, num0: str, num1: str) -> Optional[float]:
         return get_price_from_dict(self._broker_state.current_prices, num0, num1)
 
-    def get_recent_prices(self):
+    @property
+    def recent_prices(self):
         return MappingProxyType(self._broker_state.recent_prices)
+
+    def get_recent_prices(self) -> Mapping[Tuple[str, str], float]:
+        return MappingProxyType(self._broker_state.recent_prices)
+
+    def current_price_graph_is_full(
+        self, cash_nums: Iterable[str], asset_nums: Iterable[str]
+    ) -> bool:
+        """Do we have current prices for all given numeraires available?"""
+        return price_graph_is_full(self._broker_state.current_prices, cash_nums, asset_nums)
+
+    def recent_price_graph_is_full(
+        self, cash_nums: Iterable[str], asset_nums: Iterable[str]
+    ) -> bool:
+        """Do we have recent prices for all given numeraires available?"""
+        return price_graph_is_full(self._broker_state.recent_prices, cash_nums, asset_nums)
 
     def get_time(self) -> Optional[Time]:
         return self._broker_state.now
@@ -244,8 +310,16 @@ class Broker:
     def get_time_index(self) -> Optional[int]:
         return self._broker_state.time_index
 
+    @property
+    def accounts(self) -> Mapping[str, Amount]:
+        return MappingProxyType(self._broker_state.accounts)
+
     def get_accounts(self) -> Mapping[str, Amount]:
         return MappingProxyType(self._broker_state.accounts)
+
+    @property
+    def variables(self) -> Mapping[str, Union[float, str]]:
+        return MappingProxyType(self._broker_state.variables)
 
     def get_variables(self) -> Mapping[str, Union[float, str]]:
         return MappingProxyType(self._broker_state.variables)

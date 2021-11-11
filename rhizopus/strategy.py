@@ -16,6 +16,7 @@ class Strategy:
     def __init__(
         self,
         broker: Broker,
+        observer: BrokerObserver,
         max_rel_alloc_deviation: float = 0.01,
     ):
         self.broker = broker
@@ -29,7 +30,7 @@ class Strategy:
         # trigger a reallocation.
         self.max_rel_alloc_deviation = max_rel_alloc_deviation
 
-        self.observer = BrokerObserver(broker)
+        self.observer = observer
         self.price_cache = {}
 
     def run(self, start_time: datetime.datetime, max_iterations: int):
