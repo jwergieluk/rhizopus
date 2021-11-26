@@ -135,11 +135,19 @@ def main():
         [
             # earn 50bps on positive cash account value
             InterestOrder(
-                'EUR', interest_rate=0.005, value_lower_bound=0.0, value_upper_bound=math.inf
+                'EUR',
+                interest_rate=0.005,
+                value_lower_bound=0.0,
+                value_upper_bound=math.inf,
             ),
-            # pay 300bps lending cost on negative cash account value
+            # pay 300bps lending cost on negative cash account value in August
             InterestOrder(
-                'EUR', interest_rate=0.03, value_lower_bound=-math.inf, value_upper_bound=0.0
+                'EUR',
+                interest_rate=0.03,
+                value_lower_bound=-math.inf,
+                value_upper_bound=0.0,
+                accrual_start_time=datetime.datetime(2021, 8, 1),
+                accrual_end_time=datetime.datetime(2021, 9, 1),
             ),
         ]
     )

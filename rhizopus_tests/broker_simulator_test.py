@@ -3,7 +3,7 @@ import datetime
 
 import pytest
 
-from rhizopus.broker import Broker
+from rhizopus.broker import Broker, BrokerState
 from rhizopus.broker_simulator import BrokerSimulator, TransactionCostFilter, SeriesStoreFromDict
 from rhizopus.orders import CreateAccountOrder, BackwardTransferOrder
 
@@ -15,9 +15,7 @@ def test_transfer_order1():
     series_store = SeriesStoreFromDict({('EUR', 'USD'): series1, ('USD', 'JPY'): series2})
     series_store.add_inverse_series()
 
-    market = BrokerSimulator(
-        series_store, filters=[], default_numeraire='EUR', start_time=start_time
-    )
+    market = BrokerSimulator(series_store, filters=[], default_numeraire='EUR')
 
     accounts = {
         'EUR_CASH': (100.0, 'EUR'),
@@ -26,6 +24,7 @@ def test_transfer_order1():
     }
     orders = [CreateAccountOrder(acc, amount) for acc, amount in accounts.items()]
     broker = Broker(market, initial_orders=orders)
+    broker_state_copy = BrokerState.from_json(broker.state_to_json())
 
     # fill an order that cannot be executed
     broker.fill_order(BackwardTransferOrder('EUR_CASH', 'JPY_CASH', (100.0, 'EUR')))
@@ -39,6 +38,9 @@ def test_transfer_order1():
     assert accounts['EUR_CASH'] == (90.0, 'EUR')
     assert accounts['USD_CASH'] == (100.0, 'USD')
     assert accounts['JPY_CASH'] == (0.0, 'JPY')
+    assert broker_state_copy != BrokerState.from_json(
+        broker.state_to_json()
+    )  # test broker state serialization
 
 
 def test_transfer_order2():
@@ -52,9 +54,7 @@ def test_transfer_order2():
         series[key] = [(start_time + datetime.timedelta(days=t), const_price) for t in range(20)]
     series_store = SeriesStoreFromDict(series)
     series_store.add_inverse_series()
-    market = BrokerSimulator(
-        series_store, filters=[], default_numeraire='EUR', start_time=start_time
-    )
+    market = BrokerSimulator(series_store, filters=[], default_numeraire='EUR')
     accounts = {
         'EUR_CASH': (100.0, 'EUR'),
         'JPY_CASH': (0.0, 'JPY'),
@@ -63,6 +63,7 @@ def test_transfer_order2():
 
     orders = [CreateAccountOrder(acc, amount) for acc, amount in accounts.items()]
     broker = Broker(market, initial_orders=orders)
+    broker_state_copy = BrokerState.from_json(broker.state_to_json())
 
     while broker.next() is not None:
         assert 1.0 == pytest.approx(sum(broker.get_weight_all_accounts().values()))
@@ -77,6 +78,9 @@ def test_transfer_order2():
         broker.fill_order(
             BackwardTransferOrder('USD_CASH', 'EUR_CASH', (random.gammavariate(10.0, 1.0), 'USD'))
         )
+    assert broker_state_copy != BrokerState.from_json(
+        broker.state_to_json()
+    )  # test broker state serialization
 
 
 def test_transaction_cost_filter():
@@ -102,6 +106,7 @@ def test_transaction_cost_filter():
     filters = [TransactionCostFilter('EUR_CASH', 5.0, 'tc', ['EUR_CASH', 'USD_CASH'])]
     market = BrokerSimulator(series_store, filters, default_numeraire='EUR')
     broker = Broker(market, initial_orders=orders)
+    broker_state_copy = BrokerState.from_json(broker.state_to_json())
 
     broker.fill_order(BackwardTransferOrder('EUR_CASH', 'JPY_CASH', (5.0, 'EUR')))
     broker.fill_order(BackwardTransferOrder('EUR_CASH', 'JPY_CASH', (5.0, 'EUR')))
@@ -110,6 +115,9 @@ def test_transaction_cost_filter():
 
     assert 'tc' in broker.get_variables()
     assert broker.get_variables()['tc'] == 10.0
+    assert broker_state_copy != BrokerState.from_json(
+        broker.state_to_json()
+    )  # test broker state serialization
 
 
 def test_observer1():
@@ -119,9 +127,7 @@ def test_observer1():
     series = {('EUR', 'USD'): eur_usd_series, ('SPX', 'USD'): spx_usd_series}
     series_store = SeriesStoreFromDict(series)
     series_store.add_inverse_series()
-    market = BrokerSimulator(
-        series_store, filters=[], default_numeraire='EUR', start_time=start_time
-    )
+    market = BrokerSimulator(series_store, filters=[], default_numeraire='EUR')
 
     accounts = {
         'EUR_CASH': (1000.0, 'EUR'),
@@ -130,11 +136,11 @@ def test_observer1():
     }
     orders = [CreateAccountOrder(acc, amount) for acc, amount in accounts.items()]
     broker = Broker(market, initial_orders=orders)
+    broker_state_copy = BrokerState.from_json(broker.state_to_json())
 
     broker.fill_order(BackwardTransferOrder('EUR_CASH', 'USD_CASH', (1000.0, 'EUR')))
     broker.fill_order(BackwardTransferOrder('USD_CASH', 'SPX', (1.0, 'SPX')))
-    while broker.next() is not None:
-        pass
+    broker.next()
 
     account_values_eur = broker.get_value_all_accounts('EUR')
     accounts = broker.get_accounts()
@@ -148,3 +154,6 @@ def test_observer1():
     assert account_values_eur['SPX'] == 1000.0
 
     assert broker.get_value_all_accounts('USD')['SPX'] == 2000.0
+    assert broker_state_copy != BrokerState.from_json(
+        broker.state_to_json()
+    )  # test broker state serialization

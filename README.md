@@ -53,7 +53,7 @@ See `example.py` for details.
 
 ![Performance](rhizopus_perf.png)
 
-### Carpet chart
+### Portfolio weights
 
 ![Performance](rhizopus_alloc_weights_rel.png)
 

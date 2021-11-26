@@ -1,5 +1,5 @@
 import math
-from typing import Dict, Union
+from typing import Dict, Union, Any
 
 from rhizopus.broker import BrokerError, BrokerState, Order, OrderStatus
 from rhizopus.price_graph import get_price_from_dict
@@ -7,13 +7,21 @@ from rhizopus.primitives import (
     Amount,
     checked_amount,
     checked_str_id,
-    checked_value,
+    checked_real,
+    Time,
+    MIN_TIME,
+    amount_almost_eq,
+    EPS_FINANCIAL,
+    float_almost_equal,
+    MAX_TIME,
+    maybe_deserialize_time,
+    maybe_serialize_time,
 )
 
 
 class ObserveInstrumentOrder(Order):
-    def __init__(self, instrument: str):
-        super().__init__()
+    def __init__(self, instrument: str, **kwargs):
+        super().__init__(**kwargs)
         self.instrument = checked_str_id(instrument)
 
     def execute(self, broker_state: BrokerState) -> OrderStatus:
@@ -22,12 +30,19 @@ class ObserveInstrumentOrder(Order):
     def __str__(self):
         return f'{self.__class__.__name__}/{self.gid}: {self.instrument}'
 
+    def __repr__(self):
+        return f'{self.__class__.__name__}: {self.instrument}'
+
+    @classmethod
+    def from_json(cls, data: str) -> 'ObserveInstrumentOrder':
+        return eval(data)  # oh shit!
+
 
 class CreateAccountOrder(Order):
-    def __init__(self, account_name: str, amount: Amount, gid: int = 0):
-        super().__init__(gid)
+    def __init__(self, account_name: str, amount: Amount, **kwargs):
+        super().__init__(**kwargs)
         self.account_name = checked_str_id(account_name)
-        self.amount = checked_amount(amount)
+        self.amount = checked_amount(tuple(amount))
 
     def execute(self, broker_state: BrokerState) -> OrderStatus:
         if self.account_name in broker_state.accounts.keys():
@@ -39,16 +54,33 @@ class CreateAccountOrder(Order):
         broker_state.accounts[self.account_name] = self.amount
         return self.set_status(OrderStatus.EXECUTED, broker_state.now)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f'{self.__class__.__name__}("{self.account_name}", ({self.amount[0]}, "{self.amount[1]}"))'
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f'{self.__class__.__name__}/{self.gid}: {self.account_name}, ({self.amount[0]}, {self.amount[1]})'
+
+    def __eq__(self, other: 'CreateAccountOrder') -> bool:
+        return (
+            type(self) == type(other)
+            and super().__eq__(other)
+            and amount_almost_eq(self.amount, other.amount)
+        )
+
+    def to_json(self) -> Dict[str, Any]:
+        data = super().to_json()
+        data['account_name'] = self.account_name
+        data['amount'] = [self.amount[0], self.amount[1]]
+        return data
+
+    @classmethod
+    def from_json(cls, data: Dict[str, Any]) -> 'CreateAccountOrder':
+        return cls(**data)
 
 
 class DeleteAccountOrder(Order):
-    def __init__(self, account_name: str, gid: int = 0):
-        super().__init__(gid)
+    def __init__(self, account_name: str, **kwargs):
+        super().__init__(**kwargs)
         self.account_name = checked_str_id(account_name)
 
     def execute(self, broker_state: BrokerState) -> OrderStatus:
@@ -59,13 +91,17 @@ class DeleteAccountOrder(Order):
                 broker_state.now,
                 f'{self.__class__.__name__}: Account {self.account_name} not found',
             )
-        if abs(broker_state.accounts[self.account_name][0]) > 1e-12:
+        if abs(broker_state.accounts[self.account_name][0]) > EPS_FINANCIAL:
             return self.set_status(OrderStatus.ACTIVE, broker_state.now)
         del broker_state.accounts[self.account_name]
         return self.set_status(OrderStatus.EXECUTED, broker_state.now)
 
-    def __eq__(self, other):
-        return isinstance(other, self.__class__) and vars(self) == vars(other)
+    def __eq__(self, other: 'DeleteAccountOrder'):
+        return (
+            type(self) == type(other)
+            and super().__eq__(other)
+            and self.account_name == other.account_name
+        )
 
     def __repr__(self):
         return f'{self.__class__.__name__}("{self.account_name}")'
@@ -73,11 +109,20 @@ class DeleteAccountOrder(Order):
     def __str__(self):
         return f'{self.__class__.__name__}/{self.gid}: {self.account_name}'
 
+    def to_json(self) -> Dict[str, Any]:
+        data = super().to_json()
+        data['account_name'] = self.account_name
+        return data
+
+    @classmethod
+    def from_json(cls, data: Dict[str, Any]) -> 'DeleteAccountOrder':
+        return cls(**data)
+
 
 class TransferAllOrder(Order):
-    def __init__(self, acc0: str, acc1: str, persistent: bool = False, gid: int = 0):
+    def __init__(self, acc0: str, acc1: str, persistent: bool = False, **kwargs):
         """Transfer all wealth from acc0 to acc1"""
-        super().__init__(gid)
+        super().__init__(**kwargs)
         self.acc0 = checked_str_id(acc0)
         self.acc1 = checked_str_id(acc1)
         if self.acc0 == self.acc1:
@@ -110,9 +155,10 @@ class TransferAllOrder(Order):
             else self.set_status(OrderStatus.EXECUTED, broker_state.now)
         )
 
-    def __eq__(self, other):
+    def __eq__(self, other: 'TransferAllOrder'):
         return (
-            isinstance(other, self.__class__)
+            type(self) == type(other)
+            and super().__eq__(other)
             and self.acc0 == other.acc0
             and self.acc1 == other.acc1
         )
@@ -123,17 +169,36 @@ class TransferAllOrder(Order):
     def __str__(self):
         return f'{self.__class__.__name__}/{self.gid}: {self.acc0} {self.acc1}'
 
+    @classmethod
+    def from_json(cls, data: Dict[str, Any]) -> 'TransferAllOrder':
+        return cls(**data)
+
+    def to_json(self) -> Dict[str, Any]:
+        data = super().to_json()
+        data['acc0'] = self.acc0
+        data['acc1'] = self.acc1
+        return data
+
 
 class BackwardTransferOrder(Order):
-    def __init__(self, acc0: str, acc1: str, amount: Amount, gid: int = 0):
+    def __init__(
+        self,
+        acc0: str,
+        acc1: str,
+        amount: Amount,
+        rec_price_a: float = math.nan,
+        rec_price_b: float = math.nan,
+        **kwargs,
+    ):
         """Transfer wealth from acc0 to acc1 and target the specified amount change in acc1"""
-        super().__init__(gid)
+        super().__init__(**kwargs)
         self.acc0 = checked_str_id(acc0)
         self.acc1 = checked_str_id(acc1)
         if self.acc0 == self.acc1:
             raise ValueError(f'Source and destination accounts must be different: {self.acc0}')
-        self.amount = checked_amount(amount)
-        self.price_a, self.price_b = math.nan, math.nan
+        self.amount = checked_amount(tuple(amount))
+        # record prices used for execution
+        self.rec_price_a, self.rec_price_b = rec_price_a, rec_price_b
 
     def execute(self, broker_state: BrokerState) -> OrderStatus:
         acc0 = self.acc0
@@ -149,28 +214,28 @@ class BackwardTransferOrder(Order):
         order_value, order_num = self.amount
 
         if order_value >= 0.0:
-            self.price_a = get_price_from_dict(broker_state.current_prices, num0, num1)
-            self.price_b = get_price_from_dict(broker_state.current_prices, num1, order_num)
+            self.rec_price_a = get_price_from_dict(broker_state.current_prices, num0, num1)
+            self.rec_price_b = get_price_from_dict(broker_state.current_prices, num1, order_num)
         else:
-            self.price_a = get_price_from_dict(broker_state.current_prices, num1, num0)
-            self.price_b = get_price_from_dict(broker_state.current_prices, order_num, num1)
-        if self.price_a is None or self.price_b is None:
+            self.rec_price_a = get_price_from_dict(broker_state.current_prices, num1, num0)
+            self.rec_price_b = get_price_from_dict(broker_state.current_prices, order_num, num1)
+        if self.rec_price_a is None or self.rec_price_b is None:
             return OrderStatus.ACTIVE
-        if self.price_a < 0.0 or self.price_b < 0.0:
+        if self.rec_price_a < 0.0 or self.rec_price_b < 0.0:
             raise BrokerError(
-                f'Negative prices for {num0} {num1} {order_num} detected: {self.price_a} {self.price_b}'
+                f'Negative prices for {num0} {num1} {order_num} detected: {self.rec_price_a} {self.rec_price_b}'
             )
         if order_value >= 0.0:
-            new_acc0 = (value0 - order_value / (self.price_a * self.price_b), num0)
-            new_acc1 = (value1 + order_value / self.price_b, num1)
+            new_acc0 = (value0 - order_value / (self.rec_price_a * self.rec_price_b), num0)
+            new_acc1 = (value1 + order_value / self.rec_price_b, num1)
         else:
-            new_acc0 = (value0 - order_value * self.price_a * self.price_b, num0)
-            new_acc1 = (value1 + order_value * self.price_b, num1)
+            new_acc0 = (value0 - order_value * self.rec_price_a * self.rec_price_b, num0)
+            new_acc1 = (value1 + order_value * self.rec_price_b, num1)
         broker_state.accounts[acc0] = new_acc0
         broker_state.accounts[acc1] = new_acc1
         return self.set_status(OrderStatus.EXECUTED, broker_state.now)
 
-    def __eq__(self, other):
+    def __eq__(self, other: Order):
         return transfer_order_comparator(self, other)
 
     def __repr__(self):
@@ -179,17 +244,39 @@ class BackwardTransferOrder(Order):
     def __str__(self):
         return f'{self.__class__.__name__}/{self.gid}: {self.acc0} ({self.amount[0]} {self.amount[1]}) {self.acc1}'
 
+    @classmethod
+    def from_json(cls, data: Dict[str, Any]) -> 'BackwardTransferOrder':
+        return cls(**data)
+
+    def to_json(self) -> Dict[str, Any]:
+        data = super().to_json()
+        data['acc0'] = self.acc0
+        data['acc1'] = self.acc1
+        data['amount'] = [self.amount[0], self.amount[1]]
+        data['rec_price_a'] = self.rec_price_a
+        data['rec_price_b'] = self.rec_price_b
+        return data
+
 
 class ForwardTransferOrder(Order):
-    def __init__(self, acc0: str, acc1: str, amount: Amount, gid: int = 0):
+    def __init__(
+        self,
+        acc0: str,
+        acc1: str,
+        amount: Amount,
+        rec_price_a: float = math.nan,
+        rec_price_b: float = math.nan,
+        **kwargs,
+    ):
         """Transfer wealth from acc0 to acc1 and target the specified amount change in acc0"""
-        super().__init__(gid)
+        super().__init__(**kwargs)
         self.acc0 = checked_str_id(acc0)
         self.acc1 = checked_str_id(acc1)
         if self.acc0 == self.acc1:
             raise ValueError(f'Source and destination accounts must be different: {self.acc0}')
-        self.amount = checked_amount(amount)
-        self.price_a, self.price_b = math.nan, math.nan
+        self.amount = checked_amount(tuple(amount))
+        # record prices used for execution
+        self.rec_price_a, self.rec_price_b = rec_price_a, rec_price_b
 
     def execute(self, broker_state: BrokerState) -> OrderStatus:
         acc0 = self.acc0
@@ -205,30 +292,30 @@ class ForwardTransferOrder(Order):
         order_value, order_num = self.amount
 
         if order_value >= 0.0:
-            self.price_a = get_price_from_dict(broker_state.current_prices, num0, order_num)
-            self.price_b = get_price_from_dict(broker_state.current_prices, num0, num1)
+            self.rec_price_a = get_price_from_dict(broker_state.current_prices, num0, order_num)
+            self.rec_price_b = get_price_from_dict(broker_state.current_prices, num0, num1)
         else:
-            self.price_a = get_price_from_dict(broker_state.current_prices, order_num, num0)
-            self.price_b = get_price_from_dict(broker_state.current_prices, num1, num0)
-        if self.price_a is None or self.price_b is None:
+            self.rec_price_a = get_price_from_dict(broker_state.current_prices, order_num, num0)
+            self.rec_price_b = get_price_from_dict(broker_state.current_prices, num1, num0)
+        if self.rec_price_a is None or self.rec_price_b is None:
             return OrderStatus.ACTIVE
-        if self.price_a < 0.0 or self.price_b < 0.0:
+        if self.rec_price_a < 0.0 or self.rec_price_b < 0.0:
             raise BrokerError(
-                f'Negative prices for {num0} {num1} {order_num} detected: {self.price_a} {self.price_b}'
+                f'Negative prices for {num0} {num1} {order_num} detected: {self.rec_price_a} {self.rec_price_b}'
             )
         if order_value >= 0.0:
             # Send the wealth needed to buy the specified 'amount' from acc0 to acc1
-            new_acc0 = (value0 - order_value / self.price_a, num0)
-            new_acc1 = (value1 + order_value * self.price_b / self.price_a, num1)
+            new_acc0 = (value0 - order_value / self.rec_price_a, num0)
+            new_acc1 = (value1 + order_value * self.rec_price_b / self.rec_price_a, num1)
         else:
             # The amount is sold and transferred to acc0. This is financed using acc1.
-            new_acc0 = (value0 - order_value * self.price_a, num0)
-            new_acc1 = (value1 + order_value * self.price_a / self.price_b, num1)
+            new_acc0 = (value0 - order_value * self.rec_price_a, num0)
+            new_acc1 = (value1 + order_value * self.rec_price_a / self.rec_price_b, num1)
         broker_state.accounts[acc0] = new_acc0
         broker_state.accounts[acc1] = new_acc1
         return self.set_status(OrderStatus.EXECUTED, broker_state.now)
 
-    def __eq__(self, other):
+    def __eq__(self, other: Order):
         return transfer_order_comparator(self, other)
 
     def __repr__(self):
@@ -237,25 +324,34 @@ class ForwardTransferOrder(Order):
     def __str__(self):
         return f'{self.__class__.__name__}/{self.gid}: {self.acc0} ({self.amount[0]} {self.amount[1]}) {self.acc1}'
 
+    @classmethod
+    def from_json(cls, data: Dict[str, Any]) -> 'ForwardTransferOrder':
+        return cls(**data)
+
+    def to_json(self) -> Dict[str, Any]:
+        data = super().to_json()
+        # TODO deduplicate with BackwardTransferOrder
+        data['acc0'] = self.acc0
+        data['acc1'] = self.acc1
+        data['amount'] = [self.amount[0], self.amount[1]]
+        data['rec_price_a'] = self.rec_price_a
+        data['rec_price_b'] = self.rec_price_b
+        return data
+
 
 def transfer_order_comparator(o1, o2):
     if not isinstance(o1, o2.__class__):
         return False
-    if (
-        o1.acc0 == o2.acc0
-        and o1.acc1 == o2.acc1
-        and o1.amount[1] == o2.amount[1]
-        and abs(o1.amount[0] - o2.amount[0]) < 1e-12
-    ):
+    if o1.acc0 == o2.acc0 and o1.acc1 == o2.acc1 and amount_almost_eq(o1.amount, o2.amount):
         return True
     return False
 
 
 class AddToVariableOrder(Order):
-    def __init__(self, variable_name: str, value: float, gid: int = 0):
-        super().__init__(gid)
+    def __init__(self, variable_name: str, value: float, **kwargs):
+        super().__init__(**kwargs)
         self.variable_name = checked_str_id(variable_name)
-        value = checked_value(self.variable_name, value)
+        value = checked_real(self.variable_name, value)
         self.value = value
 
     def execute(self, broker_state: BrokerState) -> OrderStatus:
@@ -272,10 +368,28 @@ class AddToVariableOrder(Order):
             )
         return f"{self.__class__.__name__}/{self.gid}: {self.variable_name} += {self.value}"
 
+    def __eq__(self, other: 'AddToVariableOrder') -> bool:
+        return (
+            type(self) == type(other)
+            and super().__eq__(other)
+            and self.variable_name == other.variable_name
+            and float_almost_equal(self.value, other.value, EPS_FINANCIAL)
+        )
+
+    @classmethod
+    def from_json(cls, data: Dict[str, Any]) -> 'AddToVariableOrder':
+        return cls(**data)
+
+    def to_json(self) -> Dict[str, Any]:
+        data = super().to_json()
+        data['variable_name'] = self.variable_name
+        data['value'] = self.value
+        return data
+
 
 class UpdateVariablesOrder(Order):
-    def __init__(self, vars_update: Dict[str, Union[float, str]], gid: int = 0):
-        super().__init__(gid)
+    def __init__(self, vars_update: Dict[str, Union[float, str]], **kwargs):
+        super().__init__(**kwargs)
         # TODO check vars_update keys and values more precisely
         assert len(vars_update) > 0
         self.vars_update = vars_update
@@ -289,13 +403,16 @@ class UpdateVariablesOrder(Order):
             [str(k) + '=' + str(v) for k, v in self.vars_update.items()]
         )
 
+    @classmethod
+    def from_json(cls, data: Dict[str, Any]) -> 'UpdateVariablesOrder':
+        return cls(**data)
+
 
 class AddToAccountBalanceOrder(Order):
-    def __init__(self, account_name: str, value: float, gid: int = 0):
-        super().__init__(gid)
+    def __init__(self, account_name: str, value: float, **kwargs):
+        super().__init__(**kwargs)
         self.account_name = checked_str_id(account_name)
-        value = checked_value(self.account_name, value)
-        self.value = value
+        self.value = checked_real(self.account_name, value)
 
     def execute(self, broker_state: BrokerState) -> OrderStatus:
         if self.account_name not in broker_state.accounts:
@@ -311,6 +428,24 @@ class AddToAccountBalanceOrder(Order):
             return f"{self.__class__.__name__}/{self.gid}: {self.account_name} -= {abs(self.value)}"
         return f"{self.__class__.__name__}/{self.gid}: {self.account_name} += {self.value}"
 
+    def __eq__(self, other: 'AddToAccountBalanceOrder') -> bool:
+        return (
+            type(self) == type(other)
+            and super().__eq__(other)
+            and self.account_name == other.account_name
+            and float_almost_equal(self.value, other.value, EPS_FINANCIAL)
+        )
+
+    @classmethod
+    def from_json(cls, data: Dict[str, Any]) -> 'AddToAccountBalanceOrder':
+        return cls(**data)
+
+    def to_json(self) -> Dict[str, Any]:
+        data = super().to_json()
+        data['account_name'] = self.account_name
+        data['value'] = self.value
+        return data
+
 
 class InterestOrder(Order):
     """Allows earning or paying interest based on an account value
@@ -320,7 +455,7 @@ class InterestOrder(Order):
 
     * The interest rate is understood as a simply compounded interest rate
     * ACT/ACT day-count convention
-    * Violates the double-entry accounting principle
+    * Violates the double-entry accounting principle (by creating/destroying value)
 
     Reference: Brigo, Mercurio: Interest Rate Models
     """
@@ -334,69 +469,129 @@ class InterestOrder(Order):
         interest_rate: float,
         value_lower_bound: float = -math.inf,
         value_upper_bound: float = math.inf,
-        gid: int = 0,
+        accrual_start_time: Union[Time, str] = MIN_TIME,
+        accrual_end_time: Union[Time, str] = MAX_TIME,
+        internal_saved_value: float = math.nan,
+        internal_saved_num: str = '',
+        internal_saved_value_time_stamp: Union[Time, str] = MIN_TIME,
+        internal_variable_key: str = '',
+        **kwargs,
     ):
-        super().__init__(gid)
+        super().__init__(**kwargs)
         self.account_name = checked_str_id(account_name)
-        self.interest_rate = checked_value(self.account_name, interest_rate, -1.0, 1.0)
-        self.value_lower_bound = checked_value(
+        self.interest_rate = checked_real(self.account_name, interest_rate, -1.0, 1.0)
+        self.value_lower_bound = checked_real(
             self.account_name, value_lower_bound, -math.inf, math.inf
         )
-        self.value_upper_bound = checked_value(
+        self.value_upper_bound = checked_real(
             self.account_name, value_upper_bound, -math.inf, math.inf
         )
         if not (self.value_lower_bound <= self.value_upper_bound):
             raise ValueError(
                 f'Empty value range provided: [{self.value_lower_bound} {self.value_upper_bound}]'
             )
+        self.accrual_start_time = maybe_deserialize_time(accrual_start_time)
+        self.accrual_end_time = maybe_deserialize_time(accrual_end_time)
+        if not (self.accrual_start_time < self.accrual_end_time):
+            raise ValueError(
+                f'Empty accrual period provided: [{self.accrual_start_time} {self.accrual_end_time}]'
+            )
 
-        self._saved_value = None
-        self._saved_num = None
-        self._saved_value_time_stamp = None
-        self._variable_key = self.VARIABLE_PREFIX + self.account_name
+        self.internal_saved_value = internal_saved_value
+        self.internal_saved_num = internal_saved_num
+        self.internal_saved_value_time_stamp: Time = maybe_deserialize_time(
+            internal_saved_value_time_stamp
+        )
+        self.internal_variable_key = self.VARIABLE_PREFIX + self.account_name
+        if internal_variable_key:
+            self.internal_variable_key = internal_variable_key
+
+    def __eq__(self, other: 'InterestOrder') -> bool:
+        tmp = []
+
+        return (
+            type(self) == type(other)
+            and super().__eq__(other)
+            and self.account_name == other.account_name
+            and float_almost_equal(self.interest_rate, other.interest_rate, EPS_FINANCIAL)
+            and float_almost_equal(self.value_lower_bound, other.value_lower_bound, EPS_FINANCIAL)
+            and float_almost_equal(self.value_upper_bound, other.value_upper_bound, EPS_FINANCIAL)
+            and self.accrual_start_time == other.accrual_start_time
+            and self.accrual_end_time == other.accrual_end_time
+            and float_almost_equal(
+                self.internal_saved_value, other.internal_saved_value, EPS_FINANCIAL
+            )
+            and self.internal_saved_num == other.internal_saved_num
+            and self.internal_saved_value_time_stamp == other.internal_saved_value_time_stamp
+            and self.internal_variable_key == other.internal_variable_key
+        )
 
     def execute(self, broker_state: BrokerState) -> OrderStatus:
         if self.account_name not in broker_state.accounts:
             return self.status
 
         curr_value, curr_num = broker_state.accounts[self.account_name]
-        if self._saved_value is not None and (
-            self.value_lower_bound <= self._saved_value <= self.value_upper_bound
+        if (
+            math.isfinite(self.internal_saved_value)
+            and self.value_lower_bound <= self.internal_saved_value <= self.value_upper_bound
+            and self.accrual_start_time <= broker_state.now <= self.accrual_end_time
         ):
-            if self._saved_value_time_stamp is None:
+            if self.internal_saved_value_time_stamp is None:
                 raise BrokerError(
                     f'Saved value time-stamp for account "{self.account_name}" is None'
                 )
             time_delta_years = (
-                broker_state.now - self._saved_value_time_stamp
+                broker_state.now - self.internal_saved_value_time_stamp
             ).total_seconds() / self.SECONDS_IN_A_YEAR
             if time_delta_years < 0.0:
                 raise BrokerError(
                     f'Negative time delta during interest calculation for '
                     f'account "{self.account_name}" observed'
                 )
-            interest = self._saved_value * self.interest_rate * time_delta_years
+            interest = self.internal_saved_value * self.interest_rate * time_delta_years
             new_value = curr_value + interest
             broker_state.accounts[self.account_name] = (new_value, curr_num)
-            cum_interest = broker_state.variables.get(self._variable_key, 0.0) + interest
-            broker_state.variables[self._variable_key] = cum_interest
+            cum_interest = broker_state.variables.get(self.internal_variable_key, 0.0) + interest
+            broker_state.variables[self.internal_variable_key] = cum_interest
 
-        self._saved_value, self._saved_num = broker_state.accounts[self.account_name]
-        self._saved_value_time_stamp = broker_state.now
+        self.internal_saved_value, self.internal_saved_num = broker_state.accounts[
+            self.account_name
+        ]
+        self.internal_saved_value_time_stamp = broker_state.now
         return self.set_status(OrderStatus.ACTIVE, broker_state.now)
+
+    @classmethod
+    def from_json(cls, data: Dict[str, Any]) -> 'InterestOrder':
+        return cls(**data)
+
+    def to_json(self) -> Dict[str, Any]:
+        data = super().to_json()
+        data['account_name'] = self.account_name
+        data['interest_rate'] = self.interest_rate
+        data['value_lower_bound'] = self.value_lower_bound
+        data['value_upper_bound'] = self.value_upper_bound
+        data['accrual_start_time'] = maybe_serialize_time(self.accrual_start_time)
+        data['accrual_end_time'] = maybe_serialize_time(self.accrual_end_time)
+        data['internal_saved_value'] = self.internal_saved_value
+        data['internal_saved_num'] = self.internal_saved_num
+        data['internal_saved_value_time_stamp'] = maybe_serialize_time(
+            self.internal_saved_value_time_stamp
+        )
+        data['internal_variable_key'] = self.internal_variable_key
+        return data
 
 
 class CfdOpenOrder(Order):
     def execute(self, broker_state: BrokerState) -> OrderStatus:
         raise NotImplementedError
 
-    def __init__(self, num0: str, num1: str, units: float, gid: int = 0):
-        super().__init__(gid)
+    def __init__(self, num0: str, num1: str, units: float, **kwargs):
+        super().__init__(**kwargs)
         self.num0 = checked_str_id(num0)
         self.num1 = checked_str_id(num1)
         if self.num0 == self.num1:
             raise ValueError(f'Please specify two different numeraires: {self.num0}')
-        self.units = checked_value(f'{num0} {num1}', units)
+        self.units = checked_real(f'{num0} {num1}', units)
 
     def __eq__(self, other):
         if not isinstance(other, self.__class__):
@@ -404,13 +599,13 @@ class CfdOpenOrder(Order):
         if (
             self.num0 == other.num0
             and self.num1 == other.num1
-            and abs(self.units - other.units) < 1e-12
+            and float_almost_equal(self.units, other.units, EPS_FINANCIAL)
         ):
             return True
         if (
             self.num0 == other.num1
             and self.num1 == other.num0
-            and abs(self.units + other.units) < 1e-12
+            and abs(self.units + other.units) < EPS_FINANCIAL
         ):
             return True
         return False
@@ -421,13 +616,17 @@ class CfdOpenOrder(Order):
     def __str__(self):
         return f'{self.__class__.__name__}/{self.gid}: {self.num0}_{self.num1}: {self.units}'
 
+    @classmethod
+    def from_json(cls, data: Dict[str, Any]) -> 'CfdOpenOrder':
+        return cls(**data)
+
 
 class CfdCloseOrder(Order):
     def execute(self, broker_state: BrokerState) -> OrderStatus:
         raise NotImplementedError
 
-    def __init__(self, acc0: str, acc1: str, gid: int = 0):
-        super().__init__(gid)
+    def __init__(self, acc0: str, acc1: str, **kwargs):
+        super().__init__(**kwargs)
         self.acc0 = checked_str_id(acc0)
         self.acc1 = checked_str_id(acc1)
         if self.acc0 == self.acc1:
@@ -448,24 +647,28 @@ class CfdCloseOrder(Order):
     def __str__(self):
         return f'{self.__class__.__name__}/{self.gid}: {self.acc0}, {self.acc1}'
 
+    @classmethod
+    def from_json(cls, data: Dict[str, Any]) -> 'CfdCloseOrder':
+        return cls(**data)
+
 
 class CfdReduceOrder(Order):
     def execute(self, broker_state: BrokerState) -> OrderStatus:
         raise NotImplementedError
 
-    def __init__(self, acc0: str, acc1: str, units: float, gid: int = 0):
+    def __init__(self, acc0: str, acc1: str, units: float, **kwargs):
 
         """Reduce a Cfd trade by opening an opposite trade and merging both together
 
         The meaning of the parameters corresponds to that of the CfdOpenOrder
         """
-        super().__init__(gid)
+        super().__init__(**kwargs)
         self.acc0 = checked_str_id(acc0)
         self.acc1 = checked_str_id(acc1)
         if self.acc0 == self.acc1:
             raise ValueError(f'Source and destination accounts must be different: {self.acc0}')
 
-        units = checked_value(f'{acc0} {acc1}', units)
+        units = checked_real(f'{acc0} {acc1}', units)
         self.units0 = units
 
     def __eq__(self, other):
@@ -474,7 +677,7 @@ class CfdReduceOrder(Order):
         if (
             self.acc0 == other.acc0
             and self.acc1 == other.acc1
-            and abs(self.units0 - other.units0) < 1e-12
+            and abs(self.units0 - other.units0) < EPS_FINANCIAL
         ):
             return True
         return False
@@ -484,3 +687,7 @@ class CfdReduceOrder(Order):
 
     def __str__(self):
         return f'{self.__class__.__name__}/{self.gid}: {self.acc0}, {self.acc1}, {self.units0}'
+
+    @classmethod
+    def from_json(cls, data: Dict[str, Any]) -> 'CfdReduceOrder':
+        return cls(**data)

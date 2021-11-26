@@ -68,6 +68,7 @@ def test_simple1():
     assert rec.get_t_x('s2') == ([x[0] for x in d2s(s2)], [x[1] for x in d2s(s2)])
     assert rec.get_t_x('s3') == ([x[0] for x in d2s(s3)], [x[1] for x in d2s(s3)])
     assert min(rec.get_t_x('s1', t0)[0]) >= t0
+    assert rec == SeriesRecorder.from_json(rec.to_json())
 
 
 def test_tzinfo0():
@@ -82,12 +83,13 @@ def test_tzinfo0():
     t = datetime.datetime.combine(t.date(), t.time(), tzinfo=datetime.timezone.utc)
     wrong_times.append(t)
 
-    series_recorder = SeriesRecorder()
+    rec = SeriesRecorder()
     for t in wrong_times:
-        with pytest.raises(ValueError):
-            series_recorder.save(t, 'key0', 0.1)
+        with pytest.raises((ValueError, TypeError)):
+            rec.save(t, 'key0', 0.1)
 
-    series_recorder.save(datetime.datetime.utcnow(), 'key', 2.33)
+    rec.save(datetime.datetime.utcnow(), 'key', 2.33)
+    assert rec == SeriesRecorder.from_json(rec.to_json())
 
 
 @pytest.mark.parametrize(
@@ -95,14 +97,14 @@ def test_tzinfo0():
 )
 def test_wrong_key(key):
     rec = SeriesRecorder()
-    with pytest.raises(ValueError):
+    with pytest.raises((ValueError, TypeError)):
         rec.save(datetime.datetime.utcnow(), key, 0.01)
 
 
 @pytest.mark.parametrize('value', [None, '0', '', math.nan, math.inf, -math.inf])
 def test_wrong_value(value):
     rec = SeriesRecorder()
-    with pytest.raises(ValueError):
+    with pytest.raises((ValueError, TypeError)):
         rec.save(datetime.datetime.utcnow(), 'key', value)
 
 
@@ -159,10 +161,10 @@ def test_value_checks_nans_allowed(value: float, min_allowed: float, max_allowed
         None,
         '',
         datetime.datetime(1965, 1, 1),
-        datetime.datetime(2100, 1, 1),
+        datetime.datetime(2525, 1, 1),
     ],
 )
 def test_wrong_time(t):
     rec = SeriesRecorder()
-    with pytest.raises(ValueError):
+    with pytest.raises((ValueError, TypeError)):
         rec.save(t, 'key', 1.0)

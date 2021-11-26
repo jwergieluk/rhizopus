@@ -3,9 +3,9 @@ import itertools
 import logging
 import operator
 from collections import deque, defaultdict
-from typing import Optional, List, Union, Iterable, Tuple, Set, Dict
+from typing import Optional, List, Union, Iterable, Tuple, Set, Dict, Sequence
 
-from rhizopus.primitives import Time
+from rhizopus.primitives import Time, MIN_TIME, checked_time, checked_str_id
 from rhizopus.broker import AbstractBrokerConn, BrokerError, BrokerState, OrderStatus
 from rhizopus.orders import (
     AddToAccountBalanceOrder,
@@ -14,6 +14,7 @@ from rhizopus.orders import (
     Order,
 )
 
+logger = logging.getLogger(__name__)
 SeriesStoreData = Dict[Tuple[str, str], List[Tuple[datetime.datetime, float]]]
 
 
@@ -109,29 +110,48 @@ class TransactionCostFilter(Filter):
 class BrokerSimulator(AbstractBrokerConn):
     def __init__(
         self,
-        time_series_store: SeriesStoreBase,
+        series_store: SeriesStoreBase,
         filters: List[Filter],
         default_numeraire: str,
-        start_time: datetime.datetime = datetime.datetime.min,
+        start_time_not_before: datetime.datetime = MIN_TIME,
+        additional_times: Optional[Sequence[Time]] = None,
+        silent: bool = False,
     ):
+        """
+        Trading times: By default, the simulator calculates the time grid from observation times of all available
+        time series in the supplied series store. This time grid starts with the earliest observation time and ends
+        with the latest observation time. The `start_time_not_before` parameter can be used to move the trading start
+        time forward -- so it is an infimum for the trading times grid. The times from the `additional_times` sequence
+        are inserted into the time grid obtained from the series store. This is useful to
+        * Submit orders before the trading starts.
+        * Submit and execute order that do not require market data to do so, e.g. `CreateAccountOrder`.
+
+        :param silent: Suppress logging messages
+        """
         self.filters = filters
-        self._default_numeraire = default_numeraire
-        self._start_time = start_time
+        self._default_numeraire = checked_str_id(default_numeraire)
+        self._start_time = checked_time(start_time_not_before)
         self._prices = {}
 
-        for num_pair in time_series_store.edges():
+        for num_pair in series_store.edges():
             num0 = num_pair[0]
             num1 = num_pair[1]
-            series = time_series_store[num_pair]
+            series = series_store[num_pair]
             self._prices[(num0, num1)] = dict(series)
 
         self._time_grid = set()
         for key in self._prices:
             for times in self._prices[key]:
                 self._time_grid.add(times)
+        if additional_times:
+            for t in additional_times:
+                self._time_grid.add(checked_time(t))
+        if self._start_time > max(self._time_grid):
+            raise ValueError('Generated an empty time grid')
         self._time_grid = list(sorted(self._time_grid))
         self._time_index = 0
         self._group_id = 0
+        self.silent = silent
 
         for self._time_index in range(len(self._time_grid)):
             if self._time_grid[self._time_index] >= self._start_time:
@@ -167,15 +187,12 @@ class BrokerSimulator(AbstractBrokerConn):
             time_str = broker_state.now.strftime('%Y-%m-%d %H:%M:%S')
             if new_status == OrderStatus.EXECUTED:
                 broker_state.executed_orders.append(order)
-                logging.getLogger(__name__).info(
-                    f"{time_str} T{broker_state.time_index} : Exec: {str(order)}"
-                )
+                if not self.silent:
+                    logger.info(f"{time_str} T{broker_state.time_index} : Exec: {str(order)}")
             elif new_status == OrderStatus.ACTIVE:
                 order.age += 1
-                if order.age % 128 == 0:
-                    logging.getLogger(__name__).debug(
-                        f"{time_str} T{broker_state.time_index}: Delay: {str(order)}"
-                    )
+                if order.age % 128 == 0 and not self.silent:
+                    logger.debug(f"{time_str} T{broker_state.time_index}: Delay: {str(order)}")
                 postponed_orders.append(order)
             else:
                 broker_state.rejected_orders.append(order)

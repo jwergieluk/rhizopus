@@ -1,5 +1,5 @@
 import pytest
-from rhizopus.broker import BrokerState, BrokerError, OrderStatus
+from rhizopus.broker import BrokerState, OrderStatus, Order
 from rhizopus.orders import (
     CfdOpenOrder,
     CfdCloseOrder,
@@ -7,6 +7,11 @@ from rhizopus.orders import (
     CreateAccountOrder,
     AddToVariableOrder,
     AddToAccountBalanceOrder,
+    BackwardTransferOrder,
+    ForwardTransferOrder,
+    InterestOrder,
+    DeleteAccountOrder,
+    TransferAllOrder,
 )
 
 
@@ -100,3 +105,38 @@ def test_add_to_account_value1():
     assert ['EUR'] == list(broker_state.accounts.keys())
     assert broker_state.accounts['EUR'][0] == 10.0
     assert broker_state.accounts['EUR'][1] == 'EUR'
+
+
+@pytest.mark.parametrize(
+    'order',
+    [
+        CreateAccountOrder('EUR', (0.0, 'EUR')),
+        AddToVariableOrder('A', 5.0),
+        AddToAccountBalanceOrder('EUR', 10.0),
+    ],
+)
+def test_orders_are_not_hashable(order):
+    with pytest.raises(TypeError):
+        hash(order)
+
+
+@pytest.mark.parametrize(
+    'order',
+    [
+        CreateAccountOrder('EUR', (0.0, 'EUR')),
+        DeleteAccountOrder('USD'),
+        TransferAllOrder('EUR', 'USD', persistent=False),
+        TransferAllOrder('EUR', 'USD', persistent=True),
+        AddToVariableOrder('A', 5.0),
+        AddToAccountBalanceOrder('EUR', 10.0),
+        InterestOrder(
+            'EUR', interest_rate=0.01, value_lower_bound=-1000.0, value_upper_bound=1.8665
+        ),
+        BackwardTransferOrder('EUR_CASH', 'USD_CASH', (1.0, 'XAU')),
+        ForwardTransferOrder('EUR_CASH', 'USD_CASH', (1.0, 'XAU')),
+    ],
+)
+def test_order_serialization0(order):
+    order_serialized = order.to_json()
+    order_deserialized = Order.from_json(order_serialized)
+    assert order == order_deserialized
